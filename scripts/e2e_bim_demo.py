@@ -237,11 +237,20 @@ def main(argv=None) -> int:
     scene.compositions.clear()
     result = DS.generate_docset(scene, building)
     step("docset", f"{len(result.sheets)} tờ: {result.summary()}")
-    if len(result.sheets) < 20:
-        fail("docset", f"chỉ {len(result.sheets)} tờ")
+    # Every sheet the set hands back must carry a drawing or words: the
+    # trades the house does not have (columns, beams) are not issued at all,
+    # so the count follows the model rather than a fixed number.
+    blank = [s.name for s in result.sheets
+             if not s.frames and not any(str(t.text).strip() for t in s.texts)]
+    if blank:
+        fail("docset", f"tờ trắng được phát hành: {blank}")
     filled = [s for s in result.sheets if s.frames]
-    if len(filled) < 15:
+    if len(filled) < 14:
         fail("docset", f"chỉ {len(filled)} tờ có bản vẽ")
+    stores = [s for s in result.sheets
+              if "Mặt bằng — " in s.name and s.frames]
+    if len(stores) != len(building.stories):
+        fail("docset", f"{len(stores)} mặt bằng cho {len(building.stories)} tầng")
     # A second run must not double the set.
     frames = sum(len(s.frames) for s in result.sheets)
     scenes = len(scene.saved_views)

@@ -79,13 +79,31 @@ class SheetSpec:
     landscape: bool = True
 
 
+#: The element types each non-per-storey group needs to exist at all. A
+#: group whose trade is absent from the model is not issued: a blank sheet
+#: is worse than no sheet, because it still gets printed and bound.
+GROUP_NEEDS = {
+    "column": ("column",),
+    "beam": ("beam",),
+    "stair": ("stair",),
+    "wc": ("fixture",),
+    "door": ("door", "window"),
+    "detail": ("door", "window"),
+}
+
+
+def _has_trade(building, kinds) -> bool:
+    return any(str(e.get("type")) in kinds for e in building.elements)
+
+
 def sheet_plan(building, story_ids=None) -> list:
     """The drawing set a building is issued under, in order.
 
     ``story_ids`` limits the per-storey sheets (the three-storey townhouse
     issues three plans, three wall plans…); without it every storey gets one.
-    The result is deterministic — same model, same set — which is what makes
-    a re-issue comparable with the last one.
+    A group whose trade the model does not have is not issued at all — see
+    :data:`GROUP_NEEDS`. The result is deterministic — same model, same set
+    — which is what makes a re-issue comparable with the last one.
     """
     stories = [s for s in building.stories
                if story_ids is None or str(s["id"]) in
@@ -106,8 +124,9 @@ def sheet_plan(building, story_ids=None) -> list:
                     story_id=str(story["id"]),
                 ))
         else:
-            # A group with nothing to draw is not issued: an empty elevation
-            # sheet is worse than none.
+            needs = GROUP_NEEDS.get(group)
+            if needs and not _has_trade(building, needs):
+                continue
             counters[group] = counters.get(group, 0) + 1
             out.append(SheetSpec(key=group, group=group, label=label,
                                  title=label))

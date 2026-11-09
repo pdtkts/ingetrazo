@@ -30,6 +30,7 @@ generation worth the wait.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from core.building import drawings as _drawings
@@ -254,6 +255,86 @@ def generate_docset(scene, building, project=None, story_ids=None,
                                building=building, annotations=False)
             tick(label, 1)
 
+    # ---- the door and window location plan ------------------------------
+    # The sheet that fixes WHICH door is D01: the same cut as the plan,
+    # the openings' layer on and every other trade off, with the schedule
+    # beneath it. One sheet answers "where is this door" and "what is it".
+    door_sheet = next((s for s in made
+                       if _sheets_code_group(s) == "door"), None)
+    openings = [e for e in building.elements
+                if e.get("type") in ("door", "window")]
+    if door_sheet is not None and openings:
+        label = _sheet_view_label(door_sheet)
+        row = {"kind": "story", "story_id": ids[0], "name": label,
+               "cut_mm": float(_drawings.DEFAULT_CUT_MM)}
+        view = _drawings.view_for(building, row)
+        view.hidden_layers = _layers_except("door")
+        _sheets.fill_sheet(door_sheet, view, scene, name=label,
+                           building=None, annotations=False)
+        if annotations:
+            _fill_schedule(door_sheet, "openings", building,
+                           key="__schedule_openings__",
+                           title="BẢNG THỐNG KÊ CỬA ĐI & CỬA SỔ")
+        tick(label, 1)
+
+    # ---- the WC sheet ---------------------------------------------------
+    # The plumbing layout of the storey whose rooms say "WC": the main
+    # plan's own cut, the fixtures in place, with the fixtures' schedule
+    # so the plumber gets a count, not a hunt.
+    wc_sheet = next((s for s in made if _sheets_code_group(s) == "wc"), None)
+    wc_story = None
+    for sid in ids:
+        if any(e.get("type") == "fixture"
+               and str(e.get("story_id")) == sid
+               for e in building.elements):
+            wc_story = sid
+            break
+    if wc_sheet is not None and wc_story is not None:
+        story = building.story(wc_story)
+        story_name = str((story or {}).get("name") or wc_story)
+        label = f"{_sheet_view_label(wc_sheet)} {story_name}".strip()
+        row = {"kind": "story", "story_id": wc_story, "name": label,
+               "cut_mm": float(_drawings.DEFAULT_CUT_MM)}
+        view = _drawings.view_for(building, row)
+        view.hidden_layers = _layers_except("fixture")
+        _sheets.fill_sheet(wc_sheet, view, scene, name=label,
+                           building=None, annotations=False)
+        tick("Vệ sinh", 1)
+
+    # ---- the door detail ------------------------------------------------
+    # A 1:25 window on one door: what the joiner needs and the plan at 1:100
+    # cannot show. It is a CROP of the plan's own rule, so the wall, the
+    # opening and the cut agree with the sheet it was taken from.
+    detail_sheet = next((s for s in made
+                         if _sheets_code_group(s) == "detail"), None)
+    first_door = next((e for e in building.elements
+                       if e.get("type") == "door"), None)
+    if detail_sheet is not None and first_door is not None:
+        label = _sheet_view_label(detail_sheet)
+        source = _drawings.view_for(
+            building, {"kind": "story",
+                       "story_id": str(first_door.get("story_id"))})
+        params = first_door.get("params") or {}
+        host = building.element(str(params.get("host_wall_id") or ""))
+        a = (host.get("params") or {}).get("baseline_start_mm")             if host is not None else None
+        b = (host.get("params") or {}).get("baseline_end_mm")             if host is not None else None
+        if a and b:
+            length = math.hypot(b[0] - a[0], b[1] - a[1]) or 1.0
+            al = ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
+            off = float(params.get("offset_along_wall_mm", 0.0) or 0.0)
+            cu = a[0] + al[0] * off
+            cv = a[1] + al[1] * off
+            half = 1500.0
+            rect = [cu - half, cv - half, cu + half, cv + half]
+        else:
+            rect = [0.0, 0.0, 3000.0, 3000.0]
+        view = _drawings.detail_view(
+            building, {"kind": "detail", "name": label},
+            source, rect=rect, scale_denom=25.0)
+        _sheets.fill_sheet(detail_sheet, view, scene, name=label,
+                           building=None, annotations=False)
+        tick(label, 1)
+
     # ---- the stair detail ----------------------------------------------
     stair = next((e for e in building.elements if e.get("type") == "stair"),
                  None)
@@ -335,6 +416,47 @@ def _layers_except(only_kind: str) -> list:
     keep = element_layer(only_kind)
     return [element_layer(kind) for kind in TR_NAMES
             if element_layer(kind) != keep]
+
+
+def _fill_schedule(sheet, table_key: str, building, *, key: str,
+                   title: str = "") -> None:
+    """Write one takeoff table onto a sheet as the schedule a reader reads.
+
+    The schedule is the SAME numbers the takeoff prints — a door schedule
+    that disagrees with the priced bill is worse than no schedule — so it
+    is built from :func:`~core.building.takeoff.tables`, never recounted
+    here. Like every derived annotation it is regenerable: re-issuing the
+    sheet rewrites this block instead of stacking a second table under it.
+    """
+    from core.building import takeoff as _takeoff
+    from core.composition import TextoItem
+
+    rows = (_takeoff.tables(building) or {}).get(table_key)
+    if not rows:
+        return
+    headers = _takeoff.HEADERS.get(table_key, ())
+    if not headers and rows:
+        headers = tuple(rows[0].keys())
+    lines = [title or f"BẢNG {table_key.upper()}", ""]
+    lines.append(" | ".join(str(h) for h in headers))
+    lines.append("-" * min(90, max(20, len(lines[-1]))))
+    for row in rows:
+        lines.append(" | ".join(_cell_text(row.get(h, "")) for h in headers))
+    page_w, page_h = sheet.page_size_mm()
+    margin = float(sheet.margin_mm)
+    block = next((t for t in sheet.texts if t.list_name == key), None)
+    if block is None:
+        block = TextoItem(x_mm=margin, y_mm=page_h - margin - 90.0,
+                          w_mm=page_w - 2 * margin, text="", size_pt=9.0,
+                          align="left", list_name=key)
+        sheet.texts.append(block)
+    block.text = "\n".join(lines)
+
+
+def _cell_text(value) -> str:
+    if isinstance(value, float):
+        return f"{value:,.2f}".rstrip("0").rstrip(".")
+    return str(value)
 
 
 def _fill_cover(sheet, project: dict, building) -> None:
