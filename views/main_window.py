@@ -1823,6 +1823,10 @@ class MainWindow(QMainWindow):
         action_cancel.triggered.connect(self._cancel_tool)
         tools_menu.addAction(action_cancel)
 
+        # BIM menu: the design tools, the drawing and reporting actions and
+        # the storey helpers, in the order the work happens.
+        self._build_bim_menu(menubar)
+
         # Window menu (panels + app preferences)
         window_menu = menubar.addMenu(tr("Window"))
 
@@ -2914,6 +2918,37 @@ class MainWindow(QMainWindow):
             tr("Language changed"),
             tr("Restart IngeTrazo to apply the new language."),
         )
+
+    def _build_bim_menu(self, menubar) -> None:
+        """The **BIM** menu: the building tools, the drawing generation and
+        the takeoff — one place where the parametric model is built and
+        read."""
+        menu = menubar.addMenu(tr("BIM"))
+        self._bim_menu = menu
+
+        design = QMenu(tr("Design tools"), menu)
+        for key in ("wall", "curtain_wall", "column", "beam", "slab",
+                    "ceiling", "roof", "stair", "zone", "door", "window",
+                    "fixture"):
+            action = self._tool_actions.get(key)
+            if action is not None:
+                design.addAction(action)
+        menu.addMenu(design)
+
+        menu.addSeparator()
+        panel_action = QAction(tr("Building panel"), self)
+        panel_action.setStatusTip(tr(
+            "Storeys, elements and their parameters in one panel."))
+        panel_action.triggered.connect(self._on_show_building_panel)
+        menu.addAction(panel_action)
+
+    def _on_show_building_panel(self) -> None:
+        """Bring the BIM dock (Building + tagging) forward."""
+        tray = getattr(self, "bim_tray", None)
+        if tray is None:
+            return
+        tray.show()
+        tray.raise_()
 
     def _build_extensions_menu(self, menubar) -> None:
         """The Extensions menu: one entry per plugin tool discovered by

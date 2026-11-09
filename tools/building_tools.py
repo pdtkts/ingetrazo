@@ -180,7 +180,6 @@ class WallTool(BaselineTool):
     """Wall: click the start, click the end — chained so a run flows."""
 
     name = "Wall"
-    shortcut = "W"
     description = "Draw walls between two points; corners join themselves."
     kind = "wall"
 
@@ -199,7 +198,6 @@ class BeamTool(BaselineTool):
     """Beam: a straight axis between two points under the level above."""
 
     name = "Beam"
-    shortcut = "B"
     description = "Draw a beam along an axis; it hangs under its top level."
     kind = "beam"
 
@@ -243,7 +241,6 @@ class ColumnTool(PointTool):
     """Column: one click on its centre."""
 
     name = "Column"
-    shortcut = "C"
     description = "Place a column; its top can follow the storey above."
     kind = "column"
 
@@ -352,7 +349,6 @@ class SlabTool(AreaTool):
     """Slab: drag a rectangle, or pick the room it should fill."""
 
     name = "Slab"
-    shortcut = "S"
     description = "Draw a floor slab over a rectangle or a room."
     kind = "slab"
     pick_first = False
@@ -391,7 +387,6 @@ class ZoneTool(AreaTool):
     """Room / zone: **one click** and the room around the cursor is found."""
 
     name = "Zone"
-    shortcut = "Z"
     description = "Click inside a room: its boundary and area are detected."
     kind = "zone"
     pick_first = True
@@ -449,7 +444,6 @@ class DoorTool(BaselineTool):
     """Opening: click a wall, then the position along it."""
 
     name = "Door"
-    shortcut = "D"
     description = "Click a wall, then where the door sits along it."
     kind = "door"
     vcb_label = "Distance"
@@ -540,7 +534,6 @@ class WindowTool(DoorTool):
     """Window: the same click-a-wall flow, with window defaults."""
 
     name = "Window"
-    shortcut = "N"
     description = "Click a wall, then where the window sits along it."
     kind = "window"
 
