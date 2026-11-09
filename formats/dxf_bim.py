@@ -254,7 +254,7 @@ def _owned(scene, view):
     registry = getattr(scene, "bim_annotations", None)
     if not isinstance(registry, dict) or not registry:
         return None
-    key = _drawing_key(scene, registry_key)
+    key = _drawing_key(scene, view)
     if key is None:
         return None
     return {id(e) for e in registry.get(key, ())}

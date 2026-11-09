@@ -207,3 +207,33 @@ def test_the_file_is_in_the_unit_it_declares(tmp_path):
     assert xs, "phải có nét"
     span = max(xs) - min(xs)
     assert 5_900.0 < span < 6_100.0, f"tường 6000 mm vẽ thành {span:.0f} đơn vị"
+
+
+def test_a_dxf_carries_the_drawing_s_annotations_and_no_others(tmp_path):
+    """The document holds every storey's levels and stamps at once, and an
+    export that wrote them all would print the floor above's numbers on
+    the ground floor's plan."""
+    import ezdxf
+    from core.building import drawings as D
+    from core.building.model import Building
+    from core.scene import Scene
+    from formats.dxf_bim import save_plan_dxf
+
+    b = Building()
+    scene = Scene()
+    for i in range(2):
+        story = b.add_story(f"T{i + 1}", i * 3300.0, 3300.0)
+        b.add_element("wall", story["id"], {
+            "baseline_start_mm": [0, 0], "baseline_end_mm": [6000, 0],
+            "thickness_mm": 200.0, "height_mm": 3300.0})
+        view = D.view_for(b, {"kind": "story", "story_id": story["id"]})
+        view.annotation_key = f"dxf:{story['id']}"
+        D.annotate_plan(scene, b, view, key=view.annotation_key)
+    ground = b.stories[0]["id"]
+    path = tmp_path / "t1.dxf"
+    save_plan_dxf(str(path), scene, b, ground,
+                  annotation_key=f"dxf:{ground}")
+    texts = [e for e in ezdxf.readfile(str(path)).modelspace()
+             if e.dxftype() == "TEXT"]
+    assert 0 < len(texts) < len(scene.text_labels), \
+        f"DXF mang chú thích của cả hai tầng: {len(texts)}/{len(scene.text_labels)}"
