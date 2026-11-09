@@ -271,6 +271,45 @@ def main(argv=None) -> int:
     except ImportError:
         step("dxf", "ezdxf không có — bỏ kiểm đọc lại")
 
+    # ---- 5b. the sheets on paper ---------------------------------------
+    # The PDF needs the live window (the composer renders through it), so it
+    # runs only when one is available — a headless checkout still gets every
+    # other check.
+    try:
+        from PySide6.QtWidgets import QApplication as _App
+        if _App.instance() is None:
+            # main.py normally owns this; scripts must create it before any
+            # widget exists.
+            os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+            _App(sys.argv[:1])
+        from core.building.sheets import export_sheets_pdf
+        from views.main_window import MainWindow as _MainWindow
+        _win = _MainWindow()
+        win_scene = _win.viewport.scene
+        # The composer renders through the WINDOW's document, so the set is
+        # carried over: same rules, same scenes, same annotations.
+        from core.building.model import building_of as _bof
+        target = _bof(win_scene)
+        target.stories[:] = [dict(s) for s in building.stories]
+        target.elements[:] = [dict(e) for e in building.elements]
+        target.project.update(building.project)
+        win_scene.compositions[:] = scene.compositions
+        win_scene.saved_views[:] = scene.saved_views
+        win_scene.section_planes[:] = scene.section_planes
+        win_scene.dimensions[:] = scene.dimensions
+        win_scene.text_labels[:] = scene.text_labels
+        from core.building.scene_sync import sync as _sync
+        _sync(win_scene, target)
+        pdf = out_dir / "ho-so.pdf"
+        failed = export_sheets_pdf(_win, str(pdf))
+        step("pdf", f"{pdf.stat().st_size} bytes, "
+                    f"{len(failed)} tờ lỗi")
+        if failed:
+            fail("pdf", f"không vẽ được: {failed}")
+        _win.hide()
+    except Exception as exc:                           # noqa: BLE001
+        step("pdf", f"bỏ qua ({type(exc).__name__})")
+
     # ---- 6. the schedule ------------------------------------------------
     table_set = takeoff_tables(building)
     step("takeoff", f"{len(table_set) - 1} bảng")

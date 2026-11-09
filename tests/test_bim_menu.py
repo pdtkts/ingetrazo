@@ -66,9 +66,39 @@ def _house(win, storeys: int = 2):
 def test_the_menu_offers_the_whole_office_workflow(window):
     labels = [a.text() for a in window._bim_menu.actions()]
     for wanted in ("Lập hồ sơ tự động…", "Kiểm tra hồ sơ…",
-                   "Bảng thống kê (CSV)…", "Xuất DXF bản vẽ…",
-                   "Building panel"):
+                   "Xuất bộ tờ PDF…", "Bảng thống kê (CSV)…",
+                   "Xuất DXF bản vẽ…", "Building panel"):
         assert wanted in labels, wanted
+
+
+def test_the_pdf_action_writes_the_issued_set(window, tmp_path, monkeypatch):
+    """The office's last step: the set as ONE PDF a client can open."""
+    building, scene, _history = _house(window)
+    monkeypatch.setattr(QMessageBox, "information",
+                        staticmethod(lambda *a, **k: None))
+    window._on_generate_docset()
+    drawn = [s for s in scene.compositions
+             if any(str(getattr(f, "view_key", "")).startswith("scene:")
+                    for f in s.frames)]
+    assert drawn, "lập hồ sơ phải để lại tờ có bản vẽ"
+    path = tmp_path / "ho-so.pdf"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(path), "")))
+    window._on_export_sheets_pdf()
+    assert path.exists() and path.stat().st_size > 5000
+    assert path.read_bytes().startswith(b"%PDF")
+
+
+def test_the_pdf_action_says_so_when_there_is_nothing_to_issue(
+        window, monkeypatch):
+    """An empty document must get a word, not a zero-page file."""
+    told: list = []
+    monkeypatch.setattr(QMessageBox, "information",
+                        staticmethod(lambda *a, **k: told.append(a)))
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: QMessageBox.No))
+    window._on_export_sheets_pdf()
+    assert told, "chưa có tờ thì phải báo"
 
 
 def test_generating_the_docset_from_the_menu_fills_the_sheets(

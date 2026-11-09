@@ -2951,6 +2951,13 @@ class MainWindow(QMainWindow):
         docset_action.triggered.connect(self._on_generate_docset)
         menu.addAction(docset_action)
 
+        pdf_action = QAction(tr("Xuất bộ tờ PDF…"), self)
+        pdf_action.setStatusTip(tr(
+            "Xuất toàn bộ bộ tờ ra một PDF, mỗi tờ một trang, đúng khổ "
+            "giấy — bản phát hành gửi đi."))
+        pdf_action.triggered.connect(self._on_export_sheets_pdf)
+        menu.addAction(pdf_action)
+
         check_action = QAction(tr("Kiểm tra hồ sơ…"), self)
         check_action.setStatusTip(tr(
             "Xem trước những gì bộ bản vẽ còn thiếu trước khi sinh."))
@@ -2984,6 +2991,39 @@ class MainWindow(QMainWindow):
                 tr("Mô hình chưa có tầng nào — hãy tạo tầng trước."))
             return None
         return building
+
+    def _on_export_sheets_pdf(self) -> None:
+        """The issued set, one PDF, a page per sheet."""
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from core.building.sheets import export_sheets_pdf
+        from views.filedialogs import file_dialogs
+        building = self._bim_building()
+        if building is None:
+            return
+        scene = self.viewport.scene
+        sheets = [s for s in scene.compositions
+                  if any(getattr(f, "view_key", "").startswith("scene:")
+                         for f in s.frames)]
+        if not sheets:
+            QMessageBox.information(
+                self, tr("Xuất bộ tờ PDF"),
+                tr("Chưa có tờ nào có bản vẽ — hãy lập hồ sơ trước."))
+            return
+        path, _flt = file_dialogs.getSaveFileName(
+            self, tr("Xuất bộ tờ PDF"), "ho-so.pdf", tr("PDF (*.pdf)"))
+        if not path:
+            return
+        QApplication.processEvents()
+        try:
+            failed = export_sheets_pdf(self, path, sheets)
+        except Exception as exc:                    # noqa: BLE001 — reported
+            QMessageBox.warning(self, tr("Xuất bộ tờ PDF"),
+                                f"{type(exc).__name__}: {exc}")
+            return
+        message = tr("Đã ghi %s: %d tờ.") % (path, len(sheets))
+        if failed:
+            message += "\n" + tr("Tờ không vẽ được: %s") % ", ".join(failed)
+        QMessageBox.information(self, tr("Xuất bộ tờ PDF"), message)
 
     def _on_check_docset(self) -> None:
         from PySide6.QtWidgets import QMessageBox
