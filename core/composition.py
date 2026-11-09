@@ -324,6 +324,13 @@ class MarcoVista:
     cut_fill: str = "solid"
     cut_fill_color: str = "#595e69"
     cut_hatch_mm: float = 1.5
+    #: Per-AREA pattern names for the hatch mode, one per cut ring in the
+    #: frame's own fill order — a concrete column reads as concrete and a
+    #: masonry wall as masonry on the same sheet. DERIVED, not authored:
+    #: the frame's render fills it from the model's materials and it is
+    #: never saved; empty means the frame falls back to one pattern for
+    #: every area, which is what it always drew.
+    cut_materials: list = field(default_factory=list)
     #: Scale label of the frame ("ESC. 1:40"): follows the scale, sits
     #: under or inside the frame; ``{n}`` in the text is the scale number.
     show_scale: bool = False

@@ -93,7 +93,8 @@ deduction down to what the wall actually is.
 
 **BIM ▸ Xuất DXF bản vẽ…** writes the plan as a DXF another CAD opens —
 lines by class on their own layers with their pens, the section's HATCH
-fill, real DIMENSION and TEXT entities, millimetres declared. The file
+fill **by material**, real DIMENSION and TEXT entities, millimetres
+declared. The file
 carries **this** storey's annotations and nobody else's, and it reuses the
 key the drawing set already published that storey under, so exporting
 twice leaves the sheet as it was rather than doubling its dimension
@@ -117,6 +118,27 @@ engine the schedule reads. It validates with zero statements against
 Elements are filed under a layer per trade (`BIM Tường`, `BIM Cửa`…),
 which is what makes a layout possible: it shows one trade and hides the
 rest.
+
+### Surface fill by element
+
+A cut area is hatched by **what that area is made of**, not by one pattern
+for the whole sheet: a concrete column standing in a masonry wall reads as
+concrete against masonry, which is the one thing a poché is for. The
+pattern table is `core/building/patterns.py` (the Vietnamese materials and
+their `cut_fill`), and the same table drives the sheet, the DXF and the
+plan window — so a wall hatch that prints and a wall hatch that exports
+are the same wall.
+
+The hidden-line pass returns closed cut rings carrying no identity of their
+own (they are chained chords from a triangle soup), so
+`core/building/surface_fill.py` recovers the attribution: each element's
+own geometry is cut by the same plane and the rings are matched by their
+vertex set. A ring that cannot be matched keeps the drawing's default
+material rather than vanishing — an unattributed area is still a cut area.
+
+An area's material follows, in order, the element's own `material_id`,
+its `building_material_id` (the building fabric the element is built of —
+how a wall knows it is masonry), or the default its KIND carries.
 
 ## 5. From an AI client
 
@@ -144,4 +166,5 @@ the face-tagging layer, for BIM on freeform geometry).
 | The three-storey acceptance run | `python scripts/e2e_bim_demo.py` |
 | What a 3000-element model costs | `python scripts/bench_bim.py` |
 | The building tests | `python -m pytest tests/test_building_*.py tests/test_bim_menu.py tests/test_ai_bim.py -q` |
+| The plan's own line tools | `python -m pytest tests/test_plan_curves.py tests/test_surface_fill.py -q` |
 | The AI bridge parity | `python -m pytest tests/test_ai_bim.py tests/test_pick_inject.py -q` |

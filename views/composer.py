@@ -724,14 +724,85 @@ def _paint_hlr_lines_mm(painter: QPainter, frame: MarcoVista, hlr,
                            for x0, y0, x1, y1 in rows])
 
 
+def _paint_cut_hatches_mm(painter: QPainter, frame: MarcoVista, fills,
+                          materials) -> None:
+    """Hatch each cut ring with its OWN material's families.
+
+    ``materials`` runs parallel to ``fills`` (see where the frame's fill
+    cache is built, which is the only place the camera-plane rings still
+    exist): an empty name means the ring could not be attributed, and it
+    is hatched with the frame's own single pattern exactly as before —
+    an unattributed area is still a cut area, and leaving it white would
+    lose the poché rather than lose a detail of it."""
+    from core.building.patterns import families_for
+
+    color = QColor(getattr(frame, "cut_fill_color", "") or "#595e69")
+    base = max(0.3, float(getattr(frame, "cut_hatch_mm", 1.5) or 1.5))
+    pen = QPen(color)
+    pen.setWidthF(max(0.05, float(getattr(frame, "pen_edge_mm", 0.18) or 0.18)))
+    painter.save()
+    for index, ring in enumerate(fills):
+        pts = [QPointF(float(x), float(y)) for x, y in ring]
+        if len(pts) < 3:
+            continue
+        name = str(materials[index]) if index < len(materials) else ""
+        families = families_for(name)
+        if not families:
+            # No material of its own: the generic 45° the frame always
+            # drew, at the frame's own step.
+            families = [(45.0, base, 0.0, 0.0)]
+        clip = QPainterPath()
+        clip.moveTo(pts[0])
+        for q in pts[1:]:
+            clip.lineTo(q)
+        clip.closeSubpath()
+        painter.setClipPath(clip, Qt.IntersectClip)
+        painter.setPen(pen)
+        for angle, spacing, offset, _dash in families:
+            step = max(0.15, float(spacing) or base)
+            rad = math.radians(float(angle))
+            # Lines across the ring's box at ``angle``, offset by the
+            # family's lateral shift — the same family algebra the DXF
+            # writer's pattern definition states, drawn on paper.
+            ux, uy = math.cos(rad), math.sin(rad)
+            nx, ny = -uy, ux
+            br = clip.boundingRect()
+            far = math.hypot(br.width(), br.height()) + abs(offset)
+            mid = (br.center().x() * nx + br.center().y() * ny)
+            start = mid - far
+            count = int((2.0 * far) / step) + 2
+            for i in range(count):
+                s = start + float(offset) + i * step
+                cx, cy = nx * s, ny * s
+                painter.drawLine(QPointF(cx - ux * far, cy - uy * far),
+                                 QPointF(cx + ux * far, cy + uy * far))
+        painter.setClipping(False)
+    painter.restore()
+
+
 def _paint_cut_fills_mm(painter: QPainter, frame: MarcoVista, fills) -> None:
     """The poché: fill the closed section-cut rings (even-odd, so a hollow
-    wall stays hollow) solid or with 45° hatching, under the lines."""
+    wall stays hollow) solid or with 45° hatching, under the lines.
+
+    A hatch is READ, not decoration: concrete is dense and dotted, masonry
+    a single 45°, earth back-slanted. So when the frame asks for the
+    hatch mode and the rings can be attributed to elements, each ring is
+    hatched by ITS OWN material's families rather than one pattern for the
+    whole sheet — a concrete column standing in a masonry wall is exactly
+    what a reader looks for, and one pattern for both throws it away."""
     mode = getattr(frame, "cut_fill", "solid") or "solid"
     if not fills or mode == "none":
         return
     from PySide6.QtCore import QLineF
     from PySide6.QtGui import QPainterPath
+
+    materials = list(getattr(frame, "cut_materials", None) or ())
+    if mode == "hatch" and materials:
+        # Each area in its own material's pattern — the reading a
+        # Vietnamese section is FOR.
+        _paint_cut_hatches_mm(painter, frame, fills, materials)
+        return
+
     path = QPainterPath()
     path.setFillRule(Qt.OddEvenFill)
     for ring in fills:
@@ -12654,11 +12725,45 @@ class ComposerWindow(QMainWindow):
             else:
                 out = segs
             fills = []
+            # Each cut ring's own material, matched HERE and not at paint
+            # time: this is the last place the rings are still the camera-
+            # plane loops the model's own cut produced, and the only place
+            # the attribution can be made.
+            materials: list = []
+            # The cut comes from the scene the frame is rendered through
+            # (``_with_frame_camera`` has just applied the saved view, so
+            # the active section IS the drawing's own cut here) — not from
+            # a rule object, which no caller in this path holds.
+            cut_plane = (vp.scene.active_section()
+                         if hasattr(vp.scene, "active_section") else None)
+            attributed = []
+            if cut_plane is not None:
+                # The camera is the LIVE one inside this run — the frame's
+                # own camera has just been applied to the viewport — so the
+                # attribution is projected through it, exactly as the rings
+                # above were.
+                try:
+                    from core.building.surface_fill import (
+                        cut_rings_per_element)
+
+                    attributed = cut_rings_per_element(vp.scene, cut_plane,
+                                                       vp.camera)
+                except Exception:                   # noqa: BLE001 — a fill
+                    attributed = []                 # is never worth a crash
+            if attributed:
+                from core.building.surface_fill import (
+                    material_of_ring)
+
+                for ring in drawing.loops:
+                    key = np.asarray(ring)
+                    materials.append(material_of_ring(vp.scene, key,
+                                                      attributed, ""))
             for ring in drawing.loops:
                 mm = np.empty_like(ring)
                 mm[:, 0] = (ring[:, 0] + half_w) * k
                 mm[:, 1] = (half_h - ring[:, 1]) * k
                 fills.append(mm)
+            frame.cut_materials = materials
             self._stale.discard(id(frame))
             self.hlr_cache[id(frame)] = out
             self.hlr_kinds[id(frame)] = drawing.kinds

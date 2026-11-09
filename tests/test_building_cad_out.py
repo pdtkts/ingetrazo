@@ -162,7 +162,12 @@ def test_the_plan_reads_back_as_the_layers_cad_expects(tmp_path):
     for entity in msp:
         kinds[entity.dxftype()] = kinds.get(entity.dxftype(), 0) + 1
     assert kinds.get("LINE", 0) == counts["lines"]
-    assert kinds.get("HATCH", 0) == counts["hatch"]
+    # ``counts["hatch"]`` counts AREAS filled; a HATCH entity carries one
+    # path per area it fills, and every area of one material shares a
+    # single entity — that is what makes its pattern a single regenerable
+    # definition in the receiving CAD rather than one per wall.
+    hatch_areas = sum(len(e.paths) for e in msp if e.dxftype() == "HATCH")
+    assert hatch_areas == counts["hatch"], (hatch_areas, counts["hatch"])
     layers = {e.dxf.layer for e in msp}
     assert "KT-CUT" in layers
     assert "KT-HATCH" in layers

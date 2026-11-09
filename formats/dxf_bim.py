@@ -239,15 +239,37 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
         # stays a drawing instead of thousands of anonymous lines. The
         # definition is the pattern table's own (core.building.patterns),
         # in MILLIMETRES, which is what the file declares.
+        #
+        # WHICH pattern is the ELEMENT's own, not one material for the whole
+        # sheet: a concrete column standing in a masonry wall is exactly
+        # what the hatch is for, and hatching both as masonry threw that
+        # away. Attribution is recovered from the elements' own geometry
+        # (core.building.surface_fill) because the clipper's rings carry no
+        # identity of their own.
         from core.building.patterns import families_for
+        from core.building.surface_fill import (cut_rings_per_element,
+                                                material_of_ring)
+
+        cut_plane = (view.section_planes[0] if view.section_planes else None)
+        attributed = (cut_rings_per_element(scene, cut_plane, view.camera())
+                      if cut_plane is not None else [])
+        # One hatch object per material: a DXF pattern definition belongs
+        # to the hatch that carries it, so two materials mean two hatches,
+        # each with its own regenerable pattern.
+        hatches: dict = {}
         for ring in drawing.loops:
             points = [_mm((p[0], p[1])) for p in ring]
             if len(points) < 3:
                 continue
-            hatch = msp.add_hatch(color=8, dxfattribs={"layer": name})
-            definition = _pattern_definition(families_for(hatch_material))
-            hatch.set_pattern_fill("KT_HATCH", color=8, scale=1.0,
-                                   definition=definition)
+            material = material_of_ring(scene, ring, attributed,
+                                        hatch_material)
+            hatch = hatches.get(material)
+            if hatch is None:
+                hatch = msp.add_hatch(color=8, dxfattribs={"layer": name})
+                hatch.set_pattern_fill(
+                    "KT_HATCH", color=8, scale=1.0,
+                    definition=_pattern_definition(families_for(material)))
+                hatches[material] = hatch
             hatch.paths.add_polyline_path(points, is_closed=True)
             counts["hatch"] += 1
 
