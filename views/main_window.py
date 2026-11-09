@@ -2976,11 +2976,22 @@ class MainWindow(QMainWindow):
         )
 
     def _build_bim_menu(self, menubar) -> None:
+        from core.building import samples as _samples
+
         """The **BIM** menu: the building tools, the drawing generation and
         the takeoff — one place where the parametric model is built and
         read."""
         menu = menubar.addMenu(tr("BIM"))
         self._bim_menu = menu
+
+        samples = QMenu(tr("Dựng nhanh 3D"), menu)
+        for key in _samples.keys():
+            action = QAction(tr(_samples.name(key)), samples)
+            action.setStatusTip(tr(_samples.preset(key)["note"]))
+            action.triggered.connect(
+                lambda _on=False, k=key: self._on_build_sample(k))
+            samples.addAction(action)
+        menu.addMenu(samples)
 
         design = QMenu(tr("Design tools"), menu)
         for key in ("wall", "curtain_wall", "column", "beam", "slab",
@@ -3209,6 +3220,41 @@ class MainWindow(QMainWindow):
             tr("Đã đặt %s lên tờ %s (1:%d).")
             % (made["name"], str(getattr(sheet, "name", "")),
                int(made["scale"])))
+
+    def _on_build_sample(self, key: str) -> None:
+        """Dựng nhanh 3D: a whole parametric house in one command.
+
+        It is built through the app's OWN commands, one per element, so
+        the result is an ordinary model — undoable step by step, editable
+        with every tool, read by the takeoff and the drawings exactly as a
+        hand-drawn one is.
+        """
+        from PySide6.QtWidgets import QMessageBox
+        from core.building import samples as _samples
+
+        scene = self.viewport.scene
+        if scene.groups or scene.mesh.faces:
+            answer = QMessageBox.question(
+                self, tr("Dựng nhanh 3D"),
+                tr("Mô hình đang có nội dung. Dựng mẫu sẽ THÊM vào đó "
+                   "(mỗi cấu kiện một bước hoàn tác). Tiếp tục?"),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer != QMessageBox.Yes:
+                return
+        try:
+            _building, counts = _samples.build_sample(
+                self.viewport.history, scene, key)
+        except Exception as exc:                    # noqa: BLE001 — reported
+            QMessageBox.warning(self, tr("Dựng nhanh 3D"),
+                                f"{type(exc).__name__}: {exc}")
+            return
+        self.viewport.notify_scene_changed()
+        self.statusBar().showMessage(
+            tr("Đã dựng %s: %d tầng, %d tường, %d cửa — %d bước hoàn tác.")
+            % (_samples.name(key), counts["storeys"], counts["walls"],
+               counts["openings"],
+               counts["storeys"] + counts["walls"] + counts["openings"]
+               + counts.get("counters", 0)), 6000)
 
     def _on_manage_details(self) -> None:
         """Quản lý chi tiết: the office's own edits to the standard set."""
