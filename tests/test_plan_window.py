@@ -204,3 +204,81 @@ def test_the_linework_lands_on_the_model_not_half_a_storey_away(window):
     pad = 300.0                                  # the wall's own half-thickness
     assert box[0] - pad <= min(xs) and max(xs) <= box[2] + pad, (box, min(xs), max(xs))
     assert box[1] - pad <= min(ys) and max(ys) <= box[3] + pad, (box, min(ys), max(ys))
+
+
+def test_a_drag_moves_the_element_and_undo_puts_it_back(window):
+    """Dragging the body on the plan moves the model — one undo step.
+
+    The drag runs through the same command the properties panel uses, so
+    Undo must return the wall to its own coordinates, not to a half-state
+    that only looks right on screen.
+    """
+    from core.building import model as M
+    from views.plan_window import open_plan_window
+
+    _b, scene, history = _house(window, storeys=1)
+    plan = open_plan_window(window)
+    wall_id = plan.element_at((3000.0, 0.0))
+    assert wall_id is not None
+    plan.select(wall_id)
+    before = list(M.building_of(scene).element(wall_id)
+                  ["params"]["baseline_start_mm"])
+    # A body drag of (500, 700) millimetres, in three move events.
+    plan.drag_element(wall_id, (3300.0, 200.0), (3000.0, 0.0), "body")
+    plan.drag_element(wall_id, (3400.0, 500.0), (3000.0, 0.0), "body")
+    plan.drag_element(wall_id, (3500.0, 700.0), (3000.0, 0.0), "body")
+    mid = M.building_of(scene).element(wall_id)["params"]["baseline_start_mm"]
+    assert mid == [before[0] + 500.0, before[1] + 700.0], mid
+    plan.finish_drag(wall_id, (3000.0, 0.0), "body")
+    after = M.building_of(scene).element(wall_id)["params"]["baseline_start_mm"]
+    assert after == mid, "thả ra không được đổi số"
+    assert history.undo(), "phải có 1 bước undo"
+    back = M.building_of(scene).element(wall_id)["params"]["baseline_start_mm"]
+    assert back == before, f"undo trả về {back}, không phải {before}"
+
+
+def test_the_handle_pulls_one_end_and_leaves_the_other(window):
+    """A handle drag stretches: the far end must not move."""
+    from core.building import model as M
+    from views.plan_window import open_plan_window
+
+    _b, scene, _h = _house(window, storeys=1)
+    plan = open_plan_window(window)
+    wall_id = plan.element_at((3000.0, 0.0))
+    assert wall_id is not None
+    plan.select(wall_id)
+    params = M.building_of(scene).element(wall_id)["params"]
+    start = list(params["baseline_start_mm"])
+    end = list(params["baseline_end_mm"])
+    # The handle is taken near the END of the wall.
+    assert plan.handle_hit(wall_id, tuple(map(float, end)), 80.0) == "end"
+    assert plan.handle_hit(wall_id, tuple(map(float, start)), 80.0) == "start"
+    assert plan.handle_hit(wall_id, (3000.0, 0.0), 80.0) is None
+    plan.drag_element(wall_id, (end[0] + 1000.0, end[1] + 250.0),
+                      tuple(map(float, end)), "handle")
+    plan.finish_drag(wall_id, tuple(map(float, end)), "handle")
+    now = M.building_of(scene).element(wall_id)["params"]
+    assert now["baseline_end_mm"] == [end[0] + 1000.0, end[1] + 250.0]
+    assert now["baseline_start_mm"] == start, "đầu kia phải đứng yên"
+
+
+def test_the_properties_dialog_writes_every_field_it_shows(window):
+    """The dialog is the element's schema, and OK means one command."""
+    from core.building import model as M
+    from views.plan_window import PlanPropertiesDialog, open_plan_window
+
+    _b, scene, _h = _house(window, storeys=1)
+    plan = open_plan_window(window)
+    wall_id = plan.element_at((3000.0, 0.0))
+    assert wall_id is not None
+    dialog = PlanPropertiesDialog(plan, wall_id)
+    assert "thickness_mm" in dialog.fields
+    kind, widget = dialog.fields["thickness_mm"]
+    assert kind == "number"
+    widget.setValue(300.0)
+    dialog._accept()
+    now = M.building_of(scene).element(wall_id)["params"]["thickness_mm"]
+    assert float(now) == 300.0, now
+    # A press ON the wall away from both ends is a body grab, no handle.
+    mid = (3000.0, 0.0)
+    assert plan.handle_hit(wall_id, mid, 1.0) is None

@@ -26,9 +26,10 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
+                               QDialogButtonBox, QDoubleSpinBox, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QScrollArea, QSizePolicy, QSpinBox,
                                QTableWidget, QTableWidgetItem, QToolButton,
@@ -96,6 +97,10 @@ class _Canvas(QWidget):
         self._marks: list = []
         self._bbox = (0.0, 0.0, 1.0, 1.0)
         self._selected = None
+        #: ``(kind, element_id, grab)`` while a left drag edits the model:
+        #: ``kind`` is "body" or "handle", ``grab`` the model point the
+        #: drag started from. ``None`` means a left press is only a pick.
+        self._edit = None
         #: Fit on the first real resize, not in the constructor: the widget
         #: has a placeholder size (320x240) until the layout runs, and a
         #: fit against that frames the plan against the wrong box.
@@ -113,6 +118,10 @@ class _Canvas(QWidget):
         if self._needs_fit:
             self.fit()
         self.update()
+
+    #: How close (in screen pixels) a press must be to an element's own
+    #: end to count as its handle rather than its body.
+    HANDLE_PX = 7.0
 
     def to_screen(self, x_mm: float, y_mm: float) -> QPointF:
         k = self.scale_px_per_mm
@@ -168,13 +177,31 @@ class _Canvas(QWidget):
             event.accept()
             return
         if event.button() == Qt.LeftButton:
-            hit = self._plan.element_at(self.to_model(event.position()))
+            model = self.to_model(event.position())
+            hit = self._plan.element_at(model)
+            if hit is not None and hit == self._selected:
+                # A second press ON the selected element takes its handle
+                # instead of re-picking it: the first click says what to
+                # change, the drag from there says how.
+                handle = self._plan.handle_hit(
+                    hit, model, self.HANDLE_PX / self.scale_px_per_mm)
+                self._edit = ("handle" if handle else "body", hit, model)
+                event.accept()
+                return
             self._selected = hit
+            self._edit = None
             self._plan.select(hit)
             self.update()
             event.accept()
 
     def mouseMoveEvent(self, event) -> None:        # noqa: N802 — Qt
+        if self._edit is not None:
+            kind, element_id, grab = self._edit
+            self._plan.drag_element(element_id, self.to_model(event.position()),
+                                    grab, kind)
+            self.update()
+            event.accept()
+            return
         if self._drag_from is not None:
             delta = event.position() - self._drag_from
             self.offset += delta
@@ -185,10 +212,43 @@ class _Canvas(QWidget):
         name = self._plan.element_name_at(self.to_model(event.position()))
         self._plan.report_hover(name)
 
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 — Qt
+        if event.button() == Qt.LeftButton:
+            hit = self._plan.element_at(self.to_model(event.position()))
+            if hit is not None:
+                self._selected = hit
+                self._plan.edit_element(hit)
+                event.accept()
+
     def mouseReleaseEvent(self, event) -> None:     # noqa: N802 — Qt
+        if event.button() == Qt.LeftButton and self._edit is not None:
+            kind, element_id, grab = self._edit
+            self._edit = None
+            self._plan.finish_drag(element_id, grab, kind)
+            event.accept()
+            return
         if event.button() in (Qt.MiddleButton, Qt.RightButton):
             self._drag_from = None
             event.accept()
+
+    def _paint_handles(self, painter: QPainter) -> None:
+        """The selected element's own ends: where a drag would pull.
+
+        The square is drawn where the handle is actually taken, so the
+        affordance and the hit test cannot disagree.
+        """
+        if self._selected is None:
+            return
+        ends = self._plan._ends_of(self._selected)
+        if ends is None:
+            return
+        painter.setPen(QPen(QColor("#1e6fd9"), 1.2))
+        painter.setBrush(QColor("#FFFFFF"))
+        half = self.HANDLE_PX
+        for x_mm, y_mm in ends:
+            at = self.to_screen(x_mm, y_mm)
+            painter.drawRect(QRectF(at.x() - half / 2.0, at.y() - half / 2.0,
+                                    half, half))
 
     def paintEvent(self, _event) -> None:           # noqa: N802 — Qt
         painter = QPainter(self)
@@ -197,6 +257,7 @@ class _Canvas(QWidget):
         self._paint_loops(painter)
         self._paint_segs(painter)
         self._paint_marks(painter)
+        self._paint_handles(painter)
         painter.end()
 
     def _paint_loops(self, painter: QPainter) -> None:
@@ -250,6 +311,12 @@ class PlanWindow(QDialog):
         self._building = None
         self._story_id = ""
         self._view = None
+        #: The drag in progress: the parameters being previewed, and the
+        #: payload Undo must return to (captured at the first move).
+        self._pending = None
+        self._drag_origin = None
+        self._drag_base = None
+        self._last_moved = None
 
         lay = QVBoxLayout(self)
 
@@ -541,6 +608,185 @@ class PlanWindow(QDialog):
         else:
             self._window.viewport.update()
 
+    # ---- editing the model from the plan --------------------------------
+    def handle_hit(self, element_id, point_mm, radius_mm: float):
+        """Which end of the element a point grabs — ``"start"``/``"end"``.
+
+        ``None`` when the point is not within ``radius_mm`` of either end.
+        An element that is a point rather than a line (a fixture, a zone
+        stamp) has no handle: it moves, it does not stretch.
+        """
+        ends = self._ends_of(element_id)
+        if ends is None:
+            return None
+        (sx, sy), (ex, ey) = ends
+        if math.hypot(sx - point_mm[0], sy - point_mm[1]) <= radius_mm:
+            return "start"
+        if math.hypot(ex - point_mm[0], ey - point_mm[1]) <= radius_mm:
+            return "end"
+        return None
+
+    def _ends_of(self, element_id):
+        """``((x, y), (x, y))`` in model millimetres, or ``None``."""
+        element = self._building.element(element_id) if self._building \
+            else None
+        if element is None:
+            return None
+        params = element.get("params") or {}
+        start = params.get("baseline_start_mm")
+        end = params.get("baseline_end_mm")
+        if start and end and len(start) >= 2 and len(end) >= 2:
+            return ((float(start[0]), float(start[1])),
+                    (float(end[0]), float(end[1])))
+        outline = params.get("outline_mm") or []
+        if len(outline) >= 1 and element.get("type") == "zone":
+            xs = [float(p[0]) for p in outline]
+            ys = [float(p[1]) for p in outline]
+            return ((min(xs), min(ys)), (max(xs), max(ys)))
+        return None
+
+    def drag_element(self, element_id, point_mm, grab, kind: str) -> None:
+        """Preview one drag step: move the body, or pull one end.
+
+        The preview is the model itself — the element's own parameters
+        change and the scene is resynced — so what the user sees while
+        dragging IS what the numbers say. Nothing goes through the
+        history until the drag ends, because a drag is ONE undo step and
+        a hundred steps of one millimetre are not what anybody wants.
+        """
+        element = self._building.element(element_id) if self._building \
+            else None
+        if element is None:
+            return
+        if self._drag_origin is None:
+            # First move of the drag: this payload is what Undo must put
+            # back, so it is captured before anything changes.
+            import copy
+
+            self._drag_origin = (str(element_id),
+                                 copy.deepcopy(self._scene.plugin_data))
+            # The BASE is the element as it stood when the drag began.
+            # Every move recomputes from it: adding the delta to the
+            # already-moved parameters drifts by the whole path walked.
+            self._drag_base = copy.deepcopy(element.get("params") or {})
+        base = self._drag_base or {}
+        dx = float(point_mm[0]) - float(grab[0])
+        dy = float(point_mm[1]) - float(grab[1])
+        if kind == "handle":
+            ends = self._ends_of(element_id)
+            if ends is None:
+                return
+            (sx, sy), (ex, ey) = ends
+            # The moving end reads its base position; the fixed one is
+            # taken from the base too, so the far end cannot creep.
+            b_start = base.get("baseline_start_mm") or [sx, sy]
+            b_end = base.get("baseline_end_mm") or [ex, ey]
+            near_end = self._near_end(element_id, grab)
+            if near_end == "end":
+                moved = {"baseline_end_mm": [round(float(b_end[0]) + dx),
+                                             round(float(b_end[1]) + dy)]}
+            else:
+                moved = {"baseline_start_mm": [round(float(b_start[0]) + dx),
+                                               round(float(b_start[1]) + dy)]}
+        else:
+            moved = self._moved_params(base, base, dx, dy)
+        if not moved:
+            return
+        self._pending = self._last_moved = moved
+        element.setdefault("params", {}).update(moved)
+        self._resync_preview()
+
+    def _near_end(self, element_id, point) -> str:
+        """Which end a grab point is closer to, of the element's two."""
+        ends = self._ends_of(element_id)
+        if ends is None:
+            return "end"
+        (sx, sy), (ex, ey) = ends
+        ds = math.hypot(sx - point[0], sy - point[1])
+        de = math.hypot(ex - point[0], ey - point[1])
+        return "start" if ds <= de else "end"
+
+    def _resync_preview(self) -> None:
+        """Redraw from the model as it now stands, without the history."""
+        from core.building.scene_sync import sync
+
+        try:
+            sync(self._scene)
+        except Exception as exc:                    # noqa: BLE001 — reported
+            self._say(f"{type(exc).__name__}: {exc}")
+        self.canvas.reload()
+
+    def _moved_params(self, element, params: dict, dx: float, dy: float) -> dict:
+        """The parameters a body drag of ``(dx, dy)`` millimetres changes."""
+        out: dict = {}
+        start = params.get("baseline_start_mm")
+        end = params.get("baseline_end_mm")
+        if start and end and len(start) >= 2 and len(end) >= 2:
+            out["baseline_start_mm"] = [round(float(start[0]) + dx),
+                                        round(float(start[1]) + dy)]
+            out["baseline_end_mm"] = [round(float(end[0]) + dx),
+                                      round(float(end[1]) + dy)]
+        outline = params.get("outline_mm") or []
+        if len(outline) >= 3:
+            out["outline_mm"] = [[round(float(p[0]) + dx), round(float(p[1]) + dy)]
+                                 for p in outline]
+        centre = params.get("center_mm")
+        if centre and len(centre) >= 2:
+            out["center_mm"] = [round(float(centre[0]) + dx),
+                                round(float(centre[1]) + dy)]
+        return out
+
+    def finish_drag(self, element_id, grab, kind: str) -> None:
+        """A drag ended: put the state back, then make ONE undo step of it."""
+        del grab, kind
+        moved, self._last_moved = self._last_moved, None
+        self._pending = None
+        origin, self._drag_origin = self._drag_origin, None
+        self._drag_base = None
+        if not moved or origin is None or str(origin[0]) != str(element_id):
+            return
+        from core.building import commands as bim_commands
+        from core.building.scene_sync import sync
+
+        element = self._building.element(element_id) if self._building \
+            else None
+        if element is None:
+            return
+        # Put the payload back the way it was, then run the change as a
+        # real command: the command stores the ORIGINAL as its before
+        # state, so one Undo returns the element to where it started.
+        self._scene.plugin_data = origin[1]
+        if hasattr(self._scene, "_building_cache"):
+            del self._scene._building_cache
+        command = bim_commands.set_params(str(element_id), moved)
+        command._rebuild = lambda s, b: sync(s, b)
+        history = getattr(self._window.viewport, "history", None)
+        if history is None:
+            return
+        history.execute(command)
+        if history.last_error:
+            self._say(str(history.last_error))
+        self.refresh()
+        self.select(element_id)
+        self._say(tr("Đã sửa %s") % (self.element_name_at(
+            self._element_centre(element_id)) or str(element_id)))
+        notify = getattr(self._window, "on_scene_changed", None)
+        if callable(notify):
+            notify()
+
+    def _element_centre(self, element_id):
+        ends = self._ends_of(element_id)
+        if ends is None:
+            return (0.0, 0.0)
+        (sx, sy), (ex, ey) = ends
+        return ((sx + ex) / 2.0, (sy + ey) / 2.0)
+
+    def edit_element(self, element_id) -> None:
+        """The properties dialog for one element (double-click on the plan)."""
+        dialog = PlanPropertiesDialog(self, element_id)
+        dialog.exec()
+        self.refresh()
+
     # ---- the shortcut table ---------------------------------------------
     def show_shortcuts(self) -> None:
         dialog = PlanShortcutsDialog(self)
@@ -592,6 +838,97 @@ class PlanShortcutsDialog(QDialog):
             cells = [self.table.item(row, col) for col in range(3)]
             hay = " ".join(str(c.text() if c else "") for c in cells).lower()
             self.table.setRowHidden(row, bool(needle) and needle not in hay)
+
+
+class PlanPropertiesDialog(QDialog):
+    """One element's own parameters, editable in place.
+
+    The fields are the SCHEMA's — read from ``elements.DEFAULTS`` — so a
+    parameter added to a builder appears here without touching this file,
+    and a value that is not a number is not offered as one.
+    """
+
+    #: Parameters the plan itself sets (they are what a drag changes).
+    DRAGGED = ("baseline_start_mm", "baseline_end_mm", "outline_mm",
+               "center_mm", "host_wall_id")
+
+    def __init__(self, plan, element_id: str) -> None:
+        super().__init__(plan)
+        from core.building import elements as schemas
+
+        self._plan = plan
+        self._element_id = str(element_id)
+        building = plan._building
+        element = building.element(self._element_id) if building else None
+        kind = str(element.get("type")) if element else ""
+        self._kind = kind
+        self.setWindowTitle(tr("Thuộc tính %s") % tr(kind))
+        self.fields: dict = {}
+        lay = QVBoxLayout(self)
+        if element is None:
+            lay.addWidget(QLabel(tr("Không tìm thấy cấu kiện.")))
+            buttons = QDialogButtonBox(QDialogButtonBox.Close)
+            buttons.rejected.connect(self.reject)
+            lay.addWidget(buttons)
+            return
+
+        form = QFormLayout()
+        params = element.get("params") or {}
+        schema = schemas.defaults_for(kind) or {}
+        for key, default in schema.items():
+            if key in self.DRAGGED and key not in params:
+                continue
+            value = params.get(key, default)
+            if isinstance(value, bool):
+                box = QCheckBox()
+                box.setChecked(bool(value))
+                form.addRow(tr(key), box)
+                self.fields[key] = ("bool", box)
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                spin = QDoubleSpinBox()
+                spin.setRange(-1_000_000.0, 1_000_000.0)
+                spin.setDecimals(1)
+                spin.setValue(float(value))
+                spin.setSuffix(" mm")
+                form.addRow(tr(key), spin)
+                self.fields[key] = ("number", spin)
+            elif isinstance(value, str):
+                edit = QLineEdit(str(value))
+                form.addRow(tr(key), edit)
+                self.fields[key] = ("text", edit)
+        name = QLineEdit(str(params.get("name") or ""))
+        form.addRow(tr("Tên"), name)
+        self.fields["name"] = ("text", name)
+        lay.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok
+                                   | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def _accept(self) -> None:
+        """Write the fields back as ONE command, then close."""
+        from core.building import commands as bim_commands
+        from core.building.scene_sync import sync
+
+        params: dict = {}
+        for key, (kind, widget) in self.fields.items():
+            if kind == "bool":
+                params[key] = bool(widget.isChecked())
+            elif kind == "number":
+                params[key] = float(widget.value())
+            else:
+                text = widget.text()
+                params[key] = text
+        command = bim_commands.set_params(self._element_id, params)
+        command._rebuild = lambda s, b: sync(s, b)
+        history = getattr(self._plan._window.viewport, "history", None)
+        if history is not None:
+            history.execute(command)
+            if history.last_error:
+                self._plan._say(str(history.last_error))
+        self.accept()
 
 
 def _distance_to_element(element, x: float, y: float):
