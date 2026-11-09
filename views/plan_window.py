@@ -102,6 +102,9 @@ class _Canvas(QWidget):
         self._marks: list = []
         self._bbox = (0.0, 0.0, 1.0, 1.0)
         self._selected = None
+        #: The snap marker the cursor is currently on (drawn as a small
+        #: box), so the operator sees the drawing's own gravity.
+        self._snap_marker = None
         #: ``(kind, element_id, grab)`` while a left drag edits the model:
         #: ``kind`` is "body" or "handle", ``grab`` the model point the
         #: drag started from. ``None`` means a left press is only a pick.
@@ -219,6 +222,9 @@ class _Canvas(QWidget):
             if self._plan.draft_click(model[0], model[1]):
                 event.accept()
                 return
+            grabbed = self._plan.resolve_point(model[0], model[1])
+            if grabbed.kind in ("end", "mid", "face", "grid"):
+                model = (grabbed.x_mm, grabbed.y_mm)
             hit = self._plan.element_at(model)
             if hit is not None and hit == self._selected:
                 # A second press ON the selected element takes its handle
@@ -253,8 +259,25 @@ class _Canvas(QWidget):
             return
         model = self.to_model(event.position())
         if getattr(self._plan, "_draft", None) is not None:
-            self._plan.draft_preview(model[0], model[1])
+            tool = self._plan._draft
+            origin = tool.points[-1] if tool.points else None
+            snapped = self._plan.resolve_point(
+                model[0], model[1],
+                from_point=(origin[0], origin[1]) if origin else None)
+            self._plan._last_snap = snapped
+            self._plan.draft_preview(snapped.x_mm, snapped.y_mm)
+            self._snap_marker = snapped if snapped.kind != "none" else None
             return
+        # Not drafting: still SHOW the snap, so an operator can see the
+        # drawing's gravity before they commit to a tool.
+        from views import plan_snap
+
+        marker = plan_snap.nearest(self._plan.snap_pool(), model[0], model[1],
+                                   float(plan_snap.SNAP_PX)
+                                   / max(self.scale_px_per_mm, 1e-6))
+        self._snap_marker = marker
+        if marker is not None:
+            self._plan.report_hover(plan_snap.label_for(marker))
         name = self._plan.element_name_at(model)
         self._plan.report_hover(name)
 
@@ -332,6 +355,13 @@ class _Canvas(QWidget):
         from views.draft_tools import paint_preview
 
         paint_preview(painter, self, getattr(self._plan, "_draft", None))
+        if self._snap_marker is not None:
+            at = self.to_screen(self._snap_marker.x_mm, self._snap_marker.y_mm)
+            painter.setPen(QPen(QColor("#d97706"), 1.4))
+            painter.setBrush(Qt.NoBrush)
+            half = 5.0
+            painter.drawRect(QRectF(at.x() - half, at.y() - half,
+                                    half * 2.0, half * 2.0))
         self._paint_ghost(painter)
         self._paint_handles(painter)
         painter.end()
@@ -428,6 +458,26 @@ class PlanWindow(QDialog):
         keys.setToolTip(tr("Xem phím tắt mặc định của cửa sổ Plan"))
         keys.clicked.connect(self.show_shortcuts)
         top.addWidget(keys)
+
+        # Object snap and ortho: the two locks a drafter works with, given
+        # the place every other CAD gives them (beside the drawing, not in
+        # a dialog).
+        snap_box = QCheckBox(tr("Bám điểm"))
+        snap_box.setToolTip(tr(
+            "Bám vào điểm cuối, điểm giữa, mặt tường và trục khi vẽ — "
+            "kích thước đo ra đúng số của mô hình."))
+        snap_box.setChecked(bool(self.snap_on))
+        snap_box.toggled.connect(self._on_snap_toggled)
+        top.addWidget(snap_box)
+        self.snap_box = snap_box
+        ortho_box = QCheckBox(tr("Thẳng hướng"))
+        ortho_box.setToolTip(tr(
+            "Giữ nét theo bước 15° tính từ điểm vừa bấm (F8) — nét ngang, "
+            "dọc, 45° và 60° ra đúng hướng."))
+        ortho_box.setChecked(bool(self.ortho_on))
+        ortho_box.toggled.connect(self._on_ortho_toggled)
+        top.addWidget(ortho_box)
+        self.ortho_box = ortho_box
         top.addStretch(1)
         lay.addLayout(top)
 
@@ -441,6 +491,9 @@ class PlanWindow(QDialog):
         self.status.setWordWrap(True)
         self.status.setProperty("role", "muted")
         lay.addWidget(self.status)
+        # The Plan window owns F3/F8 while it is open: the locks belong to
+        # the drawing that is being made, not to the 3D behind it.
+        self.setFocusPolicy(Qt.StrongFocus)
 
         self.refresh()
         # The window is open while the model is edited elsewhere (the 3D,
@@ -633,6 +686,32 @@ class PlanWindow(QDialog):
                   % (self.story_box.currentText(),
                      int(_drawings.DEFAULT_CUT_MM),
                      int(self._view.scale_denom)))
+
+    def _on_snap_toggled(self, on: bool) -> None:
+        self.snap_on = bool(on)
+        self._snap_pool_key = None
+        self._snap_pool = []
+        canvas = getattr(self, "canvas", None)
+        if canvas is not None:
+            canvas._snap_marker = None
+            canvas.update()
+        self._say(tr("Bám điểm: %s") % (tr("bật") if on else tr("tắt")))
+
+    def _on_ortho_toggled(self, on: bool) -> None:
+        self.ortho_on = bool(on)
+        self._say(tr("Thẳng hướng: %s") % (tr("bật") if on else tr("tắt")))
+
+    def keyPressEvent(self, event) -> None:         # noqa: N802 — Qt
+        # F3 / F8: the two locks, on the keys every CAD gives them.
+        if event.key() == Qt.Key_F3:
+            self.snap_box.setChecked(not self.snap_box.isChecked())
+            event.accept()
+            return
+        if event.key() == Qt.Key_F8:
+            self.ortho_box.setChecked(not self.ortho_box.isChecked())
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _on_scale(self, value: int) -> None:
         if self._view is None:
@@ -853,11 +932,76 @@ class PlanWindow(QDialog):
             canvas.unsetCursor()
             canvas.update()
 
+    #: Object snap on/off, and ortho, as the workspace's own toggles.
+    snap_on = True
+    ortho_on = False
+    #: The snap candidate table, rebuilt when the model changes (it walks
+    #: every element, so it is not rebuilt per mouse move).
+    _snap_pool: list = []
+    _snap_pool_key = None
+    #: The snap the cursor is on / the last one taken — what the status
+    #: line and the little box on screen report.
+    _last_snap = None
+
+    def snap_pool(self) -> list:
+        """The points this drawing can be pulled to, cached per version.
+
+        The cache key is the model's own CONTENT, not just the scene's
+        version counter: a command executed outside the window's history
+        (a script, a test, the AI bridge) changes the building without
+        moving that counter, and a snap table built before the change
+        would keep pulling points to walls that moved.
+        """
+        if not self.snap_on or self._building is None:
+            return []
+        import json
+
+        key = (int(getattr(self._scene, "version", 0)),
+               len(self._building.elements),
+               int((self._building.settings or {}).get("_snap_stamp", 0)),
+               json.dumps([(str(e.get("id")), str(e.get("story_id")))
+                           for e in self._building.elements],
+                          separators=(",", ":")))
+        if key != self._snap_pool_key:
+            from views import plan_snap
+
+            self._snap_pool = plan_snap.candidates(self._building,
+                                                   self._story_id)
+            self._snap_pool_key = key
+        return self._snap_pool
+
+    def resolve_point(self, x_mm: float, y_mm: float, *, from_point=None,
+                      radius_px: float | None = None):
+        """The point the drawing wants, snapping first and ortho after."""
+        from views import plan_snap
+
+        radius = radius_px if radius_px is not None else plan_snap.SNAP_PX
+        scale = getattr(self.canvas, "scale_px_per_mm", 1.0) or 1.0
+        return plan_snap.resolve(
+            self._building, self._story_id, x_mm, y_mm,
+            radius_mm=float(radius) / float(scale),
+            from_point=from_point, ortho=bool(self.ortho_on),
+            candidates_list=self.snap_pool())
+
     def draft_click(self, x_mm: float, y_mm: float) -> bool:
-        """Hand a click to the armed tool. ``True`` if it took it."""
+        """Hand a click to the armed tool. ``True`` if it took it.
+
+        The point is SNAPPED first: the tool measures what the drawing
+        says, not where the mouse happened to be, which is the whole
+        difference between a dimension of 6000 and one of 6013.
+        """
         if self._draft is None:
             return False
-        done = self._draft.click(x_mm, y_mm)
+        from views import plan_snap
+
+        origin = self._draft.points[-1] if self._draft.points else None
+        snapped = self.resolve_point(
+            x_mm, y_mm,
+            from_point=(origin[0], origin[1]) if origin else None)
+        self._last_snap = snapped
+        if snapped.kind != "none":
+            self._say(plan_snap.label_for(snapped))
+        done = self._draft.click(snapped.x_mm, snapped.y_mm)
         if done:
             self.cancel_draft()
             self.refresh()
