@@ -369,6 +369,87 @@ def main(argv=None) -> int:
     except ImportError:
         step("ifc validate", "ifcopenshell không có — bỏ kiểm")
 
+    # ---- 8. the agent's bridge ------------------------------------------
+    # The MCP server speaks to the app over loopback; this drives the same
+    # session object the socket handler builds, so the check covers the
+    # agent's whole surface without a second process.
+    try:
+        from core.ai_bim import BimSession
+
+        class _Viewport:                            # a scene and a history
+            def __init__(self, scene, history):
+                self.scene = scene
+                self.history = history
+
+        session = BimSession(_Viewport(scene, history))
+        before_steps = len(history.undo_stack) if hasattr(history, "undo_stack") \
+            else None
+        story = session.add_story("Tầng 4 (AI)", 9900.0, 3300.0)
+        wall = session.wall(str(story["id"]), (0.0, 0.0), (6000.0, 0.0),
+                            name="AI-1")
+        session.edit(str(wall["id"]), thickness_mm=300.0)
+        back = session.element(str(wall["id"])) or {}
+        thickness = float((back.get("params") or {}).get("thickness_mm"))
+        step("mcp", f"agent: tầng 4 + tường AI-1 dày {thickness} mm")
+        if thickness != 300.0:
+            fail("mcp", f"agent sửa không vào mô hình: {thickness}")
+        if float(story["z_mm"]) not in [float(s["z_mm"])
+                                        for s in session.stories()]:
+            fail("mcp", "tầng do agent tạo không có trong danh sách")
+        del before_steps
+    except Exception as exc:                        # noqa: BLE001
+        fail("mcp", f"{type(exc).__name__}: {exc}")
+
+    # ---- 9. the plan window ---------------------------------------------
+    # The 2D window is a writer of the model too, so the acceptance run
+    # makes one edit THROUGH it — the same path a user's drag takes.
+    try:
+        from PySide6.QtWidgets import QApplication as _App2
+        if _App2.instance() is None:
+            os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+            _App2(sys.argv[:1])
+        from views.main_window import MainWindow as _MW2
+        from views.plan_window import open_plan_window
+
+        # Built through the commands, not by copying rows: the window
+        # reads the scene's own cached building, and a direct assignment
+        # to stories/elements never invalidates that cache.
+        from core.building.commands import add_element as _add, add_story as _story
+        from core.building.scene_sync import sync as _sync2
+
+        win2 = _MW2()
+        wscene = win2.viewport.scene
+        wh = win2.viewport.history
+        story_row = wh.execute(_story("Tầng 1", 0.0, STOREY_H))
+        wstory = building_of(wscene).stories[-1]
+        del story_row
+        wh.execute(_add("wall", wstory["id"], {
+            "baseline_start_mm": [0.0, 0.0],
+            "baseline_end_mm": [HOUSE_W, 0.0],
+            "thickness_mm": 200.0, "height_mm": STOREY_H},
+            rebuild=lambda s, b: _sync2(s, b)))
+        wbuilding = building_of(wscene)
+        plan = open_plan_window(win2)
+        wall_id = plan.element_at((3000.0, 0.0))
+        if wall_id is None:
+            fail("plan", "cửa sổ Plan không chọn được tường nào")
+        else:
+            plan.select(wall_id)
+            plan.drag_element(wall_id, (3500.0, 100.0), (3000.0, 0.0), "body")
+            plan.finish_drag(wall_id, (3000.0, 0.0), "body")
+            moved = (wbuilding.element(wall_id) or {}).get("params") or {}
+            where = moved.get("baseline_start_mm")
+            segs = plan.build_drawing()[0]
+            step("plan", f"kéo tường trên Plan → start={where}, "
+                         f"{len(segs)} nét")
+            if where != [500.0, 100.0]:
+                fail("plan", f"kéo trên Plan cho start={where}")
+            if not segs:
+                fail("plan", "cửa sổ Plan không vẽ được gì")
+        win2.hide()
+    except Exception as exc:                           # noqa: BLE001
+        fail("plan", f"{type(exc).__name__}: {exc}")
+
     report["ok"] = not report["failures"]
     report["out_dir"] = str(out_dir)
     if args.json:
