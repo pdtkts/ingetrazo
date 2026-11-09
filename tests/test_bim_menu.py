@@ -86,6 +86,26 @@ def test_the_menu_offers_the_whole_office_workflow(window):
         assert wanted in labels, wanted
 
 
+def test_the_menu_asks_for_the_job_before_it_issues_the_set(window):
+    """The title block prints on every sheet, so the job's own data is on
+    the way IN to Lập hồ sơ — not buried in a preferences dialog, which is
+    where a user only looks after the first wrong PDF."""
+    labels = [a.text() for a in window._bim_menu.actions()]
+    assert "Thông tin dự án…" in labels, labels
+    assert labels.index("Thông tin dự án…") < labels.index(
+        "Lập hồ sơ tự động…"), labels
+
+
+def test_the_menu_offers_the_advanced_maintenance(window):
+    """The maintenance a long job needs, in one group, each entry real."""
+    advanced = window._bim_advanced
+    labels = [a.text() for a in advanced.actions()]
+    for wanted in ("Dựng lại mô hình (nối tường)", "Kiểm tra DXF đã xuất…",
+                   "Đo lag…", "Tạm dừng BIM"):
+        assert wanted in labels, (wanted, labels)
+    assert window._pause_action.isCheckable()
+
+
 def test_the_pdf_action_writes_the_issued_set(window, tmp_path, monkeypatch):
     """The office's last step: the set as ONE PDF a client can open."""
     building, scene, _history = _house(window)
