@@ -45,9 +45,16 @@ def _signature(building, element) -> tuple:
             == str(element.get("id"))))
     neighbours = ()
     if element.get("type") == "wall" and story is not None:
-        neighbours = tuple(sorted(
-            str(w.get("id")) for w in building.on_story(str(story["id"]),
-                                                        "wall")))
+        # The NEIGHBOURS' GEOMETRY, not just their names: a wall's body is
+        # trimmed against the walls it meets, so moving a partner changes
+        # this wall's shape without changing anything of its own. Listing
+        # ids only (as this once did) made the signature identical after a
+        # partner moved, the sync then SKIPPED the untouched wall, and the
+        # corner kept last revision's mitre — the same fingerprint the
+        # join solver caches on, for the same reason.
+        from core.building.builder import _joins_fingerprint
+
+        neighbours = _joins_fingerprint(building, str(story["id"]))
     return (
         str(element.get("type")),
         _freeze(params),

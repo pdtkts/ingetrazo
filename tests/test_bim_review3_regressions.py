@@ -322,3 +322,81 @@ def test_a_handle_drag_stretches_one_end_and_leaves_the_other():
     assert near_b - near_a == pytest.approx(1000.0)
     plan.hide()
     win.hide()
+
+
+def test_moving_a_partner_wall_rebuilds_the_wall_it_meets():
+    """A wall's body is trimmed against the walls it meets, so the rebuild
+    signature has to carry their GEOMETRY, not just their names — a
+    signature that only listed ids stayed identical after a partner moved,
+    the sync skipped the untouched wall, and the corner kept the old
+    mitre."""
+    from core.building import samples as S
+    from core.building import scene_sync as SS
+    from core.building.model import building_of
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    S.build_sample(History(scene), scene, "townhouse")
+    building = building_of(scene)
+    wall = next(e for e in building.elements if e.get("type") == "wall")
+    partner = next(e for e in building.elements
+                   if e.get("type") == "wall" and e["id"] != wall["id"]
+                   and e["story_id"] == wall["story_id"])
+    before = SS._signature(building, wall)
+    partner["params"]["baseline_start_mm"] = [
+        float(v) + 900.0 for v in partner["params"]["baseline_start_mm"]]
+    assert SS._signature(building, wall) != before, \
+        "chữ ký không đổi khi tường bạn bị dời — góc sẽ giữ vát cũ"
+    # and a wall on ANOTHER storey must not trigger this one
+    other = next(e for e in building.elements
+                 if e.get("type") == "wall"
+                 and e["story_id"] != wall["story_id"])
+    steady = SS._signature(building, wall)
+    other["params"]["baseline_start_mm"] = [500.0, 500.0]
+    assert SS._signature(building, wall) == steady, \
+        "tường tầng khác làm dựng lại tường tầng này"
+
+
+def test_a_real_sync_repairs_the_corner_the_undo_left(tmp_path):
+    """End to end through the app's own path: move a wall a storey up, undo
+    it, and the untouched partner must be back to the right shape."""
+    from core.building import commands as C
+    from core.building import samples as S
+    from core.building import scene_sync as SS
+    from core.building.model import building_of
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    scene = win.viewport.scene
+    S.build_sample(win.viewport.history, scene, "townhouse")
+    building = building_of(scene)
+    wall = next(e for e in building.elements if e.get("type") == "wall")
+    group = SS.group_for(scene, wall["id"])
+    assert group is not None
+    from core.building.builder import build
+
+    mesh_before, _derived = build(building, wall)
+    verts_before = sorted((round(e.v0.position.x(), 4),
+                           round(e.v0.position.y(), 4))
+                          for e in mesh_before.edges)
+    del verts_before
+
+    partner = next(e for e in building.elements
+                   if e.get("type") == "wall" and e["id"] != wall["id"]
+                   and e["story_id"] == wall["story_id"])
+    win.viewport.history.execute(C.set_params(
+        str(partner["id"]),
+        {"baseline_start_mm": [float(v) + 1200.0
+                               for v in partner["params"]["baseline_start_mm"]]}))
+    win.viewport.history.undo()
+    # after the undo the wall's own cached mesh must match a fresh build
+    rebuilt = building_of(scene)
+    fresh, _d = build(rebuilt, rebuilt.element(wall["id"]))
+    live = SS.group_for(scene, wall["id"])
+    live_pts = sorted((round(e.v0.position.x(), 4), round(e.v0.position.y(), 4))
+                      for e in live.mesh.edges)
+    fresh_pts = sorted((round(e.v0.position.x(), 4), round(e.v0.position.y(), 4))
+                       for e in fresh.edges)
+    assert live_pts == fresh_pts, "góc tường còn vát của lần sửa trước"
+    win.hide()
