@@ -3384,5 +3384,19 @@
   "The Bulgarian translation.": "الترجمة البلغارية.",
   "The Traditional Chinese translation.": "الترجمة الصينية التقليدية.",
   "A .skp component 10 000 times too big, traced.": "تتبُّع مكون .skp أكبر من حجمه بـ 10 000 مرة.",
-  "Thanks as well to all the authors of the extensions catalogue": "شكرًا أيضًا لجميع مؤلفي كتالوج الإضافات"
+  "Thanks as well to all the authors of the extensions catalogue": "شكرًا أيضًا لجميع مؤلفي كتالوج الإضافات",
+  "Click the start of the wall; the next wall starts where this one ended.": "انقر بداية الجدار؛ يبدأ الجدار التالي حيث انتهى هذا الجدار.",
+  "Click the end, or type the length and Enter.": "انقر النهاية، أو اكتب الطول ثم Enter.",
+  "Click the start of the glazed run.": "انقر بداية الجدار الزجاجي.",
+  "Click the end; the carrier wall is made with it.": "انقر النهاية؛ يُنشأ الجدار الحامل معه.",
+  "Click the start of the beam's axis.": "انقر بداية محور الجسر.",
+  "Click the end; the beam hangs under the level above.": "انقر النهاية؛ يتدلى الجسر أسفل المنسوب الأعلى.",
+  "Click the column's centre.": "انقر مركز العمود.",
+  "Click the wall the door goes in.": "انقر الجدار الذي يوضع فيه الباب.",
+  "Click where it sits along the wall, or type the distance.": "انقر موضعه على الجدار، أو اكتب المسافة.",
+  "Click the wall the window goes in.": "انقر الجدار الذي توضع فيه النافذة.",
+  "Click the fixture's centre.": "انقر مركز القطعة الصحية.",
+  "Drag a rectangle, or Ctrl = pick the room's boundary.": "اسحب مستطيلاً، أو Ctrl = التقاط حدود الغرفة.",
+  "Drag the rectangle, or click the room's inside.": "اسحب المستطيل، أو انقر داخل الغرفة.",
+  "Click inside the room: its boundary and area are found.": "انقر داخل الغرفة: تُكتشف الحدود والمساحة."
 }

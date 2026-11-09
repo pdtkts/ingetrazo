@@ -3350,5 +3350,19 @@
   "The Bulgarian translation.": "Българският превод.",
   "The Traditional Chinese translation.": "Преводът на традиционен китайски.",
   "A .skp component 10 000 times too big, traced.": "Открит компонент от .skp, 10 000 пъти по-голям.",
-  "Thanks as well to all the authors of the extensions catalogue": "Благодарим също на всички автори от каталога с разширения"
+  "Thanks as well to all the authors of the extensions catalogue": "Благодарим също на всички автори от каталога с разширения",
+  "Click the start of the wall; the next wall starts where this one ended.": "Кликнете началото на стената; следващата стена започва там, където тази свърши.",
+  "Click the end, or type the length and Enter.": "Кликнете края или въведете дължината и Enter.",
+  "Click the start of the glazed run.": "Кликнете началото на витринната стена.",
+  "Click the end; the carrier wall is made with it.": "Кликнете края; носещата стена се създава с нея.",
+  "Click the start of the beam's axis.": "Кликнете началото на оста на гредата.",
+  "Click the end; the beam hangs under the level above.": "Кликнете края; гредата виси под нивото отгоре.",
+  "Click the column's centre.": "Кликнете центъра на колоната.",
+  "Click the wall the door goes in.": "Кликнете стената, в която отива вратата.",
+  "Click where it sits along the wall, or type the distance.": "Кликнете мястото по стената или въведете разстоянието.",
+  "Click the wall the window goes in.": "Кликнете стената, в която отива прозорецът.",
+  "Click the fixture's centre.": "Кликнете центъра на санитарния прибор.",
+  "Drag a rectangle, or Ctrl = pick the room's boundary.": "Начертайте правоъгълник или Ctrl = вземи контура на помещението.",
+  "Drag the rectangle, or click the room's inside.": "Начертайте правоъгълника или кликнете вътре в помещението.",
+  "Click inside the room: its boundary and area are found.": "Кликнете вътре в помещението: контурът и площта се откриват."
 }

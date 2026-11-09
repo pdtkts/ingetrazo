@@ -3567,5 +3567,19 @@
   "“{name}” was read, but it has nothing that can be imported: no lines, polylines, arcs, circles, ellipses, splines or faces in the model space.": "Đã đọc “{name}” nhưng không có gì để nhập: không có đường thẳng, đa tuyến, cung, đường tròn, elip, spline hay mặt trong không gian mô hình.",
   "−": "−",
   "− Row": "− Hàng",
-  "⚠ {name} (load error)": "⚠ {name} (lỗi tải)"
+  "⚠ {name} (load error)": "⚠ {name} (lỗi tải)",
+  "Click the start of the wall; the next wall starts where this one ended.": "Bấm điểm đầu của tường; tường kế tiếp bắt đầu ngay tại điểm vừa kết thúc.",
+  "Click the end, or type the length and Enter.": "Bấm điểm cuối, hoặc gõ chiều dài rồi Enter.",
+  "Click the start of the glazed run.": "Bấm điểm đầu của vách kính.",
+  "Click the end; the carrier wall is made with it.": "Bấm điểm cuối; tường chịu lực được tạo kèm theo.",
+  "Click the start of the beam's axis.": "Bấm điểm đầu trục dầm.",
+  "Click the end; the beam hangs under the level above.": "Bấm điểm cuối; dầm treo dưới cao độ tầng trên.",
+  "Click the column's centre.": "Bấm tâm cột.",
+  "Click the wall the door goes in.": "Bấm vào tường sẽ đặt cửa đi.",
+  "Click where it sits along the wall, or type the distance.": "Bấm vị trí cửa trên tường, hoặc gõ khoảng cách.",
+  "Click the wall the window goes in.": "Bấm vào tường sẽ đặt cửa sổ.",
+  "Click the fixture's centre.": "Bấm tâm thiết bị vệ sinh.",
+  "Drag a rectangle, or Ctrl = pick the room's boundary.": "Kéo một hình chữ nhật, hoặc Ctrl = chọn theo biên phòng.",
+  "Drag the rectangle, or click the room's inside.": "Kéo hình chữ nhật, hoặc bấm vào bên trong phòng.",
+  "Click inside the room: its boundary and area are found.": "Bấm vào trong phòng: biên và diện tích được nhận tự động."
 }
