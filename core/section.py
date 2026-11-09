@@ -83,7 +83,7 @@ class SectionPlane:
     the active one, stays. Hidden and inactive is a plane switched off."""
 
     __slots__ = ("point", "normal", "name", "symbol", "active", "uid",
-                 "hidden", "fill", "layer")
+                 "hidden", "fill", "layer", "clip_only")
 
     def __init__(self, point: QVector3D, normal: QVector3D,
                  name: str = "", symbol: str = "",
@@ -110,6 +110,13 @@ class SectionPlane:
         #: Stable identity for scenes (.igz SavedView references) — survives
         #: reordering and deletion of OTHER planes.
         self.uid = _take_uid(uid)
+        #: CLIP-ONLY plane: it hides its side (and so removes whatever lies
+        #: below a plan's floor) but its trace draws no cut line and no
+        #: poché. A plan cuts at +1.20 m to show the walls it passes through,
+        #: yet the ground and the footing under the floor must be gone
+        #: without a second set of cut chords smeared across the drawing —
+        #: this is the reference's «xén theo cao độ» (mặt phẳng XEN).
+        self.clip_only: bool = False
 
     def flip(self) -> None:
         """Reverse: the cut hides the other side."""
@@ -136,6 +143,8 @@ class SectionPlane:
             entry["hidden"] = True          # older readers ignore it
         if self.layer:
             entry["layer"] = self.layer   # older readers ignore it
+        if self.clip_only:
+            entry["clip_only"] = True     # older readers ignore it
         if self.fill:
             entry["fill"] = {k: (list(v) if k == "color" else v)
                              for k, v in self.fill.items()}
@@ -149,6 +158,7 @@ class SectionPlane:
                  uid=raw.get("uid"), hidden=bool(raw.get("hidden", False)))
         if isinstance(raw.get("layer"), str) and raw["layer"]:
             sp.layer = raw["layer"]
+        sp.clip_only = bool(raw.get("clip_only", False))
         fill = raw.get("fill")
         if isinstance(fill, dict):
             clean = {}

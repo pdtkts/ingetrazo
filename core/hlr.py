@@ -182,6 +182,7 @@ def clip_to_section(tris, hard, soft, plane, split_cuts: bool = False):
     With ``split_cuts`` the chords come back as a fourth list instead of
     joining the hard edges — the drawing that inks them thicker and fills
     the poché needs to know which lines are the cut."""
+    clip_only = bool(getattr(plane, "clip_only", False))
     nx = plane.normal.x()
     ny = plane.normal.y()
     nz = plane.normal.z()
@@ -222,7 +223,9 @@ def clip_to_section(tris, hard, soft, plane, split_cuts: bool = False):
                 x = lerp(a, b, da, db)
                 poly.append(x)
                 crossings.append(x)
-        if len(crossings) == 2:
+        if clip_only:
+            pass            # a clip plane hides its side; it never draws
+        elif len(crossings) == 2:
             cut_edges.append((crossings[0], crossings[1]))
         for i in range(1, len(poly) - 1):     # fan
             out_tris.append((poly[0], poly[i], poly[i + 1]))
@@ -802,7 +805,8 @@ def _merge_collinear(segs, world, kinds, tol: float, tags=None):
 
 def hlr_drawing(scene, camera, geometry=None, profiles: bool = True,
                 fills: bool = True, caps: bool = True,
-                hidden: bool = False, layers: bool = False) -> HlrDrawing:
+                hidden: bool = False, layers: bool = False,
+                clip_planes=None) -> HlrDrawing:
     """The full line drawing of *scene* under *camera* (parallel): visible
     segments classified as edge / profile / cut, plus the section-cut
     rings to fill. :func:`hlr_view` is the segments-only view of this.
@@ -838,6 +842,11 @@ def hlr_drawing(scene, camera, geometry=None, profiles: bool = True,
     walk of :func:`collect_geometry` — 5 s on a 106k-triangle fountain —
     and runs the silhouette rule vectorised.
 
+    ``clip_planes`` — extra cutting planes applied OUTSIDE the scene's own
+    active section, drawn nowhere: a plan view's floor limit, so what lies
+    below the storey is gone from the sheet without a cut line to show for
+    it (the reference's «mặt phẳng XEN»).
+
     `layers=True` tags every segment with the layer it is inked with
     (`HlrDrawing.layers`) — what a sheet needs to draw each layer with its
     own colour, line type and weight. It walks the model itself (the fast
@@ -856,20 +865,29 @@ def hlr_drawing(scene, camera, geometry=None, profiles: bool = True,
     sp = (scene.active_section()
           if getattr(scene, "show_section_cuts", True)
           and hasattr(scene, "active_section") else None)
+    # The scene's own cut comes first (it draws the chords); the extra
+    # planes a view brings (a plan's floor limit) then trim whatever is
+    # left, quietly — they hide and never cut.
+    planes = ([sp] if sp is not None else []) + list(clip_planes or ())
     cut_edges: list = []
-    if sp is not None:
+    if planes:
         if soft_n is not None:          # the clipper walks tuple lists
             tris, hard, soft = _geometry_as_lists(tris, hard, soft, soft_n)
             soft_n = None
-        if htags is None:
-            tris, hard, soft, cut_edges = clip_to_section(
-                tris, hard, soft, sp, split_cuts=True)
-        else:
-            # Clipped layer by layer, so each piece keeps its tag.
-            tris, _h, _s, cut_edges = clip_to_section(tris, [], [], sp,
-                                                      split_cuts=True)
-            hard, htags = _clip_tagged(hard, htags, sp, soft=False)
-            soft, stags = _clip_tagged(soft, stags, sp, soft=True)
+        for i, plane in enumerate(planes):
+            if htags is None:
+                tris, hard, soft, chords = clip_to_section(
+                    tris, hard, soft, plane, split_cuts=True)
+                if i == 0:
+                    cut_edges = chords
+            else:
+                # Clipped layer by layer, so each piece keeps its tag.
+                tris, _h, _s, chords = clip_to_section(tris, [], [], plane,
+                                                       split_cuts=True)
+                hard, htags = _clip_tagged(hard, htags, plane, soft=False)
+                soft, stags = _clip_tagged(soft, stags, plane, soft=True)
+                if i == 0:
+                    cut_edges = chords
     _e, _r, _u, fwd = camera_basis(camera)
 
     def empty_drawing():
