@@ -758,6 +758,8 @@ class Scene:
             self.kept_components.clear()
             self.materials.clear()
             self.plugin_data = {}
+            from core.building.model import drop_cache
+            drop_cache(self)
             self.bim_annotations = {}
             self.detail_overrides = {}
             self.pens = {}
@@ -787,6 +789,8 @@ class Scene:
         self.views_home = None
         self.units = {"length": "m", "precision": 2}
         self.plugin_data = {}
+        from core.building.model import drop_cache
+        drop_cache(self)
 
     # ---- Queries ------------------------------------------------------------
     def iter_world_faces(self):

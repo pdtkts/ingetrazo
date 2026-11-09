@@ -1470,6 +1470,12 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     scene.units = model_units_of(payload)   # validated; absent = metres
     pdata = payload.get("plugin_data")
     scene.plugin_data = dict(pdata) if isinstance(pdata, dict) else {}
+    # The building cache is keyed by the scene, not by its contents: a
+    # scene that had already been asked for its building would keep
+    # serving the model built BEFORE this load — the storeys would be
+    # missing from a document that has them.
+    from core.building.model import drop_cache
+    drop_cache(scene)
     scales = payload.get("custom_scales")
     if isinstance(scales, list):
         scene.custom_scales = [float(n) for n in scales

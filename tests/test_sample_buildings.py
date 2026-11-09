@@ -85,6 +85,48 @@ def test_the_presets_are_stated_once_and_read_consistently():
         S.preset("nope")
 
 
+def test_opening_a_file_gives_back_the_storeys_it_holds(tmp_path):
+    """The building is memoised on the scene BY IDENTITY, but its contents
+    come from plugin_data — which a load replaces. A scene that had already
+    been asked for its building (a dock, a panel, a signal during startup)
+    kept serving the EMPTY model built before the load: the walls came back
+    and the storeys did not."""
+    from core.building.model import building_of
+    from core.scene import Scene
+    from formats.igz import load_into, save_scene
+
+    from core.building import samples as S
+    from core.history import History
+
+    scene = Scene()
+    S.build_sample(History(scene), scene, "townhouse")
+    doc = tmp_path / "house.igz"
+    save_scene(scene, doc)
+
+    reopened = Scene()
+    building_of(reopened)                 # the stale cache: empty model
+    load_into(reopened, doc)
+    back = building_of(reopened)
+    assert len(back.stories) == 3, "tầng bị mất khi mở file"
+    assert back.elements, "cấu kiện bị mất khi mở file"
+
+
+def test_a_new_document_forgets_the_previous_building():
+    """Ctrl+N drops plugin_data, so it must drop the memoised building too:
+    otherwise the new document shows the old house."""
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    S.build_sample(History(scene), scene, "townhouse")
+    assert building_of(scene).stories
+    scene.clear()
+    assert not building_of(scene).stories
+    assert not building_of(scene).elements
+
+
 def test_the_menu_builds_a_sample_into_the_document():
     from core.building.model import building_of
     from views.main_window import MainWindow

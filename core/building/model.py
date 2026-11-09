@@ -181,6 +181,21 @@ def building_of(scene) -> Building:
     return cache[1]
 
 
+def drop_cache(scene) -> None:
+    """Forget the memoised building of ``scene``.
+
+    The cache is keyed by the scene's IDENTITY, but its contents come from
+    ``scene.plugin_data`` — which a LOAD replaces wholesale. Opening a
+    document into a scene that had already been asked for its building
+    (a panel, a dock, a signal firing during startup) therefore kept
+    serving the EMPTY model built before the load: the walls came back and
+    the storeys did not. Whoever swaps ``plugin_data`` drops it here, so
+    the next reader rebuilds from what is actually in the document.
+    """
+    if hasattr(scene, "_building_cache"):
+        del scene._building_cache
+
+
 def store(scene, building: Building | None = None) -> None:
     """Write the building back into ``scene.plugin_data`` (the save path)."""
     if building is None:
