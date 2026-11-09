@@ -168,3 +168,42 @@ def test_the_plan_reads_back_as_the_layers_cad_expects(tmp_path):
     assert "KT-HATCH" in layers
     # The unit the office set is the unit the file declares.
     assert int(doc.header.get("$INSUNITS", 0)) == 4          # millimetres
+
+
+def test_the_file_is_in_the_unit_it_declares(tmp_path):
+    """A CAD reads the file with the unit the file states.
+
+    The drawing arrives in camera-plane metres and the header says
+    millimetres; if the two disagree the receiving office gets a house
+    1000 times too small and a dimension that agrees with nothing. The
+    wall here is 6000 mm long, so its linework must span 6000 units.
+    """
+    import ezdxf
+
+    from core.building.builder import build
+    from core.building.drawings import view_for
+    from core.building.model import Building
+    from core.building.scene_sync import sync
+    from core.scene import Scene
+    from formats.dxf_bim import save_drawing_dxf
+
+    b = Building()
+    story = b.add_story("T1", 0.0, 3300.0)
+    b.add_element("wall", story["id"], {
+        "baseline_start_mm": [0.0, 0.0], "baseline_end_mm": [6000.0, 0.0],
+        "thickness_mm": 200.0, "height_mm": 3300.0})
+    for element in list(b.elements):
+        build(b, element)
+    scene = Scene()
+    sync(scene, b)
+    view = view_for(b, {"kind": "story", "story_id": story["id"]})
+    path = tmp_path / "unit.dxf"
+    save_drawing_dxf(str(path), view, scene)
+
+    doc = ezdxf.readfile(str(path))
+    assert int(doc.header.get("$INSUNITS", 0)) == 4          # millimetres
+    xs = [e.dxf.start.x for e in doc.modelspace()
+          if e.dxftype() == "LINE"]
+    assert xs, "phải có nét"
+    span = max(xs) - min(xs)
+    assert 5_900.0 < span < 6_100.0, f"tường 6000 mm vẽ thành {span:.0f} đơn vị"

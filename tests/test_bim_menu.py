@@ -287,3 +287,25 @@ def test_the_menu_offers_the_library_details(window, monkeypatch):
     assert sheet.shapes and sheet.etiquetas
     assert any(str(t.list_name).startswith("__detail__") for t in sheet.texts)
     del QComboBox, DL
+
+
+def test_the_panel_names_an_element_it_could_not_build(window):
+    """A silent absence is the worst thing a parametric tool can do: an
+    element that fails must be said out loud, where the user is looking."""
+    from core.building import building_of
+    from core.building.commands import add_element
+    from core.building.scene_sync import sync
+    from views.building_panel import BuildingPanel
+
+    building, scene, history = _house(window)
+    sid = str(building.stories[0]["id"])
+    # A door whose host wall does not exist: it cannot be cut into anything.
+    history.execute(add_element(
+        "door", sid, {"host_wall_id": "khong-co",
+                      "offset_along_wall_mm": 1000.0,
+                      "width_mm": 900.0, "height_mm": 2200.0},
+        rebuild=lambda s, b: sync(s, b)))
+    panel = BuildingPanel(window)
+    assert panel.warnings.isVisibleTo(panel), "phải hiện cảnh báo"
+    assert "không dựng được" in panel.warnings.text()
+    assert "tường chủ" in panel.warnings.text()

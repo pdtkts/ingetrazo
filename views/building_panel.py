@@ -77,6 +77,17 @@ class BuildingPanel(QWidget):
         scroll.setMinimumHeight(120)
         lay.addWidget(scroll, 1)
 
+        # What the last synchronisation could not build. An element that
+        # fails (a door whose host wall was deleted, a wall with no
+        # baseline) simply does not appear in a parametric tool, and a
+        # silent absence is the worst thing it can do — so the panel says
+        # it, in the same place the user is already looking.
+        self.warnings = QLabel("")
+        self.warnings.setWordWrap(True)
+        self.warnings.setProperty("role", "error")
+        self.warnings.setVisible(False)
+        lay.addWidget(self.warnings)
+
         self.hint = QLabel("")
         self.hint.setWordWrap(True)
         self.hint.setProperty("role", "muted")
@@ -125,8 +136,25 @@ class BuildingPanel(QWidget):
                 self.story_tree.setCurrentItem(picked)
             self._fill_elements()
             self._fill_fields()
+            self._show_errors()
         finally:
             self._loading = False
+
+    def _show_errors(self) -> None:
+        errors = list(getattr(self._scene(), "building_errors", None) or ())
+        if not errors:
+            self.warnings.setVisible(False)
+            self.warnings.setText("")
+            return
+        # Each entry is ``(element id, the reason)``; the reason is what a
+        # reader can act on, so it is what the label shows.
+        lines = [str(e[1]) if isinstance(e, (list, tuple)) and len(e) > 1
+                 else str(e) for e in errors]
+        self.warnings.setText(
+            tr("%d cấu kiện không dựng được:") % len(lines) + " "
+            + "; ".join(lines[:3])
+            + (" …" if len(lines) > 3 else ""))
+        self.warnings.setVisible(True)
 
     def _fill_elements(self) -> None:
         building = self._building()

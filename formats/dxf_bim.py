@@ -107,6 +107,15 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
                           section=(view.section_planes[0]
                                    if view.section_planes else None))
     counts = {"lines": 0, "hatch": 0, "dimensions": 0, "text": 0}
+    # The drawing arrives in camera-plane METRES (that is what the HLR
+    # works in) while the file declares millimetres — the office's own
+    # unit, and the one a receiving CAD reads geometry with. Everything
+    # crosses here, once: a 6 m wall must write as 6000, not 6.
+    MM = 1000.0
+
+
+    def _mm(point):
+        return (float(point[0]) * MM, float(point[1]) * MM)
 
     # ---- linework, per class ------------------------------------------
     # One line class per layer, so the CAD's pen table can give each its
@@ -128,8 +137,7 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
             # on the wrong layer is a nuisance, a line not drawn is a fault.
             if kinds is not None and int(kinds[i]) != wanted:
                 continue
-            msp.add_line((float(seg[0]), float(seg[1])),
-                         (float(seg[2]), float(seg[3])),
+            msp.add_line(_mm((seg[0], seg[1])), _mm((seg[2], seg[3])),
                          dxfattribs={"layer": name})
             counts["lines"] += 1
 
@@ -139,7 +147,7 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
         name = mapped_layer("KT-HATCH", layer_map)
         _ensure_layer(doc, name, 8, lw)
         for ring in drawing.loops:
-            points = [(float(p[0]), float(p[1])) for p in ring]
+            points = [_mm((p[0], p[1])) for p in ring]
             if len(points) < 3:
                 continue
             hatch = msp.add_hatch(color=8, dxfattribs={"layer": name})
@@ -165,7 +173,7 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
         def to_plane(point):
             c = _to_cam(np.array([[point.x(), point.y(), point.z()]],
                                  dtype=float), eye, right, up, fwd)[0]
-            return (float(c[0]), float(c[1]))
+            return (float(c[0]) * MM, float(c[1]) * MM)
 
         for label in getattr(scene, "text_labels", None) or []:
             if not scene.entity_visible(label):
@@ -198,7 +206,7 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
         def to_plane(point):
             c = _to_cam(np.array([[point.x(), point.y(), point.z()]],
                                  dtype=float), eye, right, up, fwd)[0]
-            return (float(c[0]), float(c[1]))
+            return (float(c[0]) * MM, float(c[1]) * MM)
 
         for dim in getattr(scene, "dimensions", None) or []:
             if not scene.entity_visible(dim):
