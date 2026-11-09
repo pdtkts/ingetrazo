@@ -203,9 +203,22 @@ def pattern_for_kind(kind: str) -> list:
     return families_for(str(material.get("cut_fill") or ""))
 
 
+#: A ceiling on one hatch's total work, across all its families. A pattern
+#: that goes past this is a mistake in the table or a cut nobody would draw
+#: at this scale; either way, stopping is right, and 12000 segments on one
+#: wall is a sheet that takes a minute to open.
+MAX_SEGMENTS = 4000
+
+
 def pattern_for_rings(rings, material_name: str) -> list:
-    """The whole hatch of ``material_name`` over ``rings``, families merged."""
+    """The whole hatch of ``material_name`` over ``rings``, families merged.
+
+    The budget is TOTAL, not per family: three families of 4000 would
+    otherwise be 12000 segments for one cut.
+    """
     out: list = []
     for angle, spacing, offset, dash in families_for(material_name):
         out.extend(pattern_segments(rings, angle, spacing, offset, dash))
-    return out
+        if len(out) >= MAX_SEGMENTS:
+            break
+    return out[:MAX_SEGMENTS]

@@ -55,6 +55,20 @@ def test_a_pattern_stays_within_a_drawable_budget():
         segs = P.pattern_for_rings([_OUTER], name)
         assert 10 <= len(segs) <= 1500, f"{name}: {len(segs)} nét"
 
+    # …and the budget is TOTAL, not per family: a 40 m cut at a coarse
+    # scale must not multiply three families' worth of segments.
+    huge = [(0.0, 0.0), (40000.0, 0.0), (40000.0, 40000.0), (0.0, 40000.0)]
+    for name in P.names():
+        segs = P.pattern_for_rings([huge], name)
+        assert len(segs) <= P.MAX_SEGMENTS, f"{name}: {len(segs)} nét"
+
+
+def test_odd_rings_give_nothing_rather_than_a_crash():
+    """A hatch is derived decoration: a ring with two points is a mistake
+    upstream, and the hatch must simply not appear."""
+    assert P.pattern_for_rings([], "Gỗ") == []
+    assert P.pattern_for_rings([[(0.0, 0.0), (1.0, 0.0)]], "Gỗ") == []
+
 
 def test_the_spacing_is_on_paper_so_two_scales_agree():
     """A 1:50 and a 1:100 of one wall must look the same on the sheet.
