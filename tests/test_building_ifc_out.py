@@ -151,3 +151,29 @@ def test_the_quantities_a_consumer_reads_are_the_takeoff_numbers(exported):
         for q in getattr(qs, "Quantities", [])
         if q.Name == "NetSideArea" and getattr(q, "AreaValue", None))
     assert net < gross, "diện tích thực phải nhỏ hơn diện tích tính tiền"
+
+
+def test_the_takeoff_and_the_ifc_state_the_same_areas(exported):
+    """The CSV the office sends and the IFC the consultant opens must agree.
+
+    Not approximately, and not after someone runs a check by hand: the same
+    derived numbers feed both, so the two files are compared here.
+    """
+    from core.building.takeoff import tables
+
+    model, b, _n = exported
+    totals = tables(b)["totals"]
+    gross = sum(
+        q.AreaValue for wall in model.by_type("IfcWall")
+        for rel in wall.IsDefinedBy
+        if rel.is_a("IfcRelDefinesByProperties")
+        for q in getattr(rel.RelatingPropertyDefinition, "Quantities", [])
+        if q.Name == "GrossSideArea")
+    net = sum(
+        q.AreaValue for wall in model.by_type("IfcWall")
+        for rel in wall.IsDefinedBy
+        if rel.is_a("IfcRelDefinesByProperties")
+        for q in getattr(rel.RelatingPropertyDefinition, "Quantities", [])
+        if q.Name == "NetSideArea")
+    assert gross == pytest.approx(totals["wall_area_m2"], abs=0.01)
+    assert net == pytest.approx(totals["wall_net_area_m2"], abs=0.01)
