@@ -230,7 +230,15 @@ class NavigatorDock(QWidget):
         if kind == "story" and value:
             from core.building import model as building_model
 
-            building_model.building_of(self._scene()).set_active_story(value)
+            # The live cache AND the document: writing only the cache left
+            # `plugin_data['building']['settings']` untouched, so the user's
+            # next edit closed over a payload with no active storey — and
+            # undoing that unrelated edit reset "which storey I am drawing
+            # in" to None. Navigation reaches the saved document here.
+            building = building_model.building_of(self._scene())
+            building.set_active_story(value)
+            building_model.store(self._scene(), building)
+            self._scene().version += 1
             self._window.statusBar().showMessage(
                 tr("Tầng đang vẽ: %s") % item.text(0).split("   ")[0], 3000)
             self._notify()

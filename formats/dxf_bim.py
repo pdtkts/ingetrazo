@@ -413,6 +413,16 @@ def _drawing_key(scene, view):
     wanted = str(getattr(view, "annotation_key", "") or "")
     if wanted and wanted in registry:
         return wanted
+    # The key a drawing set filed this storey under carries the storey's own
+    # ID («Mặt bằng Tầng 1·story-abc»): two storeys may legitimately share a
+    # name, and the id is the only part that cannot. Look for it FIRST —
+    # it is the exact answer, where the name lookups below are guesses.
+    story = str(getattr(view, "story_id", "") or "")
+    if story:
+        suffix = f"·{story}"
+        for key in registry:
+            if str(key).endswith(suffix) or str(key).endswith(f"{suffix}·grid"):
+                return str(key)
     candidates = [str(getattr(view, "name", "") or ""),
                   str(getattr(view, "story_id", "") or "")]
     for candidate in candidates:

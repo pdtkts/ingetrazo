@@ -196,9 +196,18 @@ class BimSession:
         # looking at. So the export PUBLISHES this storey's annotations
         # under its own key first, exactly as the menu does, and exports
         # that: the agent's file is then the same drawing the menu's is.
+        #
+        # The key REUSES the one a drawing set already filed this storey
+        # under. Minting a private `dxf:<id>` beside it left BOTH sets in
+        # the document, and the composer draws every dimension its frame
+        # can see — so one bridge export doubled the sheet's chains and the
+        # duplicate set stayed in the file. The menu was fixed for this;
+        # the agent's path was not.
+        from formats.dxf_bim import resolve_annotation_key
+
         view = _drawings.view_for(
             self.building, {"kind": "story", "story_id": str(story_id)})
-        view.annotation_key = f"dxf:{story_id}"
+        view.annotation_key = resolve_annotation_key(self.scene, view)
         _drawings.annotate_plan(self.scene, self.building, view,
                                 key=view.annotation_key)
         # The office's own inking travels with the file, exactly as the

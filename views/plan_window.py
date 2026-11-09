@@ -69,7 +69,7 @@ COMMAND_TOOLS = {
     # The plan's own 2D drawing (see views.draft_tools): these are handled
     # INSIDE the plan window, because the points they need are plan points.
     "dim": "dim", "level": "level", "text": "text", "label": "label",
-    "grid": "grid",
+    "grid": "grid", "crop": "crop",
     "select": "select", "protractor": "protractor", "measure": "tape",
     "move": "move", "rotate": "rotate", "scale": "scale",
     "offset": "offset", "eraser": "eraser", "delete": "eraser",

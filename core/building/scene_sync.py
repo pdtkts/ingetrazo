@@ -239,7 +239,17 @@ def sync(scene, building=None, element_ids=None, force: bool = False):
         try:
             mesh, derived = builders.build(building, element)
         except ValueError as exc:
+            # A build that FAILED publishes no geometry. Leaving the
+            # element's previous group standing made the renderer, the HLR
+            # and the composer draw a door whose host wall was deleted —
+            # while the panel's own banner said that element could not be
+            # built and the takeoff had stopped counting it. The picture
+            # and the numbers must not disagree about an element the model
+            # itself calls broken.
             errors.append((str(element["id"]), str(exc)))
+            if group is not None:
+                scene.groups.remove(group)
+                removed += 1
             continue
         if mesh is None:
             # Area data (a zone): keep the parameters, draw nothing.

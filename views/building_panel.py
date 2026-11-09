@@ -378,6 +378,13 @@ class BuildingPanel(QWidget):
 
         params = {key: self._read_field(key) for key in self._fields}
         params = {k: v for k, v in params.items() if v is not None}
+        # The NAME does not travel. It is the element's own MARK — «D1»,
+        # «C3» — and the office's scheme is what the schedule groups by and
+        # the drawing stamps: copying it turned four doors into one row
+        # «D99 ×4», so a quantity table silently re-bucketed and the marks
+        # could no longer be ordered or told apart on site. Everything the
+        # button is FOR (thickness, material, height) still travels.
+        params.pop("name", None)
         if not params:
             self.hint.setText(tr("Không có thông số nào để áp."))
             return
@@ -427,8 +434,19 @@ class BuildingPanel(QWidget):
         eid = self._current_story_id()
         if eid is None:
             return
-        self._building().set_active_story(str(eid))
-        self._emit(bim_commands.set_story_params(str(eid), {}))
+        # PICKING A STOREY IS NAVIGATION, NOT AN EDIT. Routed through the
+        # History it pushed a step whose only change was
+        # `settings.active_story` — so browsing four storeys cost four undo
+        # slots (and ~136 KiB of payload on a 63-element model), and the
+        # user's next Ctrl+Z undid a navigation they never made, leaving
+        # the panel showing «Tầng 3» while the model said «Tầng 1». The
+        # value is written to the document directly, which is what it is.
+        from core.building import model as _model
+
+        building = self._building()
+        building.set_active_story(str(eid))
+        _model.store(self._scene(), building)
+        self._scene().version += 1
         self._loading = True
         try:
             self._fill_elements()

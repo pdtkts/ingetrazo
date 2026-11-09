@@ -849,3 +849,236 @@ def test_a_targeted_rebuild_does_not_clear_another_element_s_error():
 
     sync(scene, building_of(scene), element_ids=[str(wall["id"])])
     assert scene.building_errors, "dựng lại một tường lại xoá lỗi của sàn"
+
+
+# ---- Review 6 -----------------------------------------------------------------
+
+def test_two_storeys_may_share_a_name_without_losing_annotations():
+    """The registry key was the drawing's NAME, so two storeys called
+    «Tầng» — ordinary in a house — shared one entry: issuing the second
+    POPPED the first one's published dimensions out of the document. The
+    sheet then showed the floor above's chains and one storey's annotations
+    were gone for good."""
+    from core.building import commands as C
+    from core.building import docset as _docset
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    history = History(scene)
+    S.build_sample(history, scene, "townhouse")
+    building = building_of(scene)
+    for story in building.stories[:2]:
+        history.execute(C.set_story_params(str(story["id"]),
+                                           {"name": "Tầng"}))
+    building = building_of(scene)
+
+    _docset.generate_docset(scene, building, annotations=True)
+
+    keys = [str(k) for k in scene.bim_annotations]
+    assert len(set(keys)) == len(keys), keys
+    # EVERY storey keeps its own chains: the count is the whole model's,
+    # not one storey's worth.
+    assert len(scene.dimensions) >= 42, len(scene.dimensions)
+
+    # And each storey's export reads its OWN levels.
+    import pathlib
+    import tempfile
+
+    import ezdxf
+
+    from formats.dxf_bim import save_plan_dxf
+
+    building = building_of(scene)
+    seen = []
+    for index in (0, 1):
+        out = pathlib.Path(tempfile.mkdtemp()) / f"s{index}.dxf"
+        save_plan_dxf(str(out), scene, building,
+                      str(building.stories[index]["id"]))
+        doc = ezdxf.readfile(str(out))
+        texts = [e.dxf.text for e in doc.modelspace().query("TEXT")
+                 if hasattr(e.dxf, "text")]
+        seen.append(tuple(sorted({t for t in texts
+                                  if t.startswith(("FL:", "CL:"))})))
+    assert seen[0] == ("CL:+3300", "FL:+0000"), seen
+    assert seen[1] == ("CL:+6600", "FL:+3300"), seen
+
+
+def test_the_agent_s_export_does_not_double_the_sheet():
+    """The menu's export was fixed to reuse the set's key; the AI bridge
+    still minted its own private one, so an agent's export put a second
+    dimension chain on the same sheet — the exact defect, on the path the
+    bridge drives."""
+    import pathlib
+    import tempfile
+
+    from core.ai_bim import BimSession
+    from core.building import docset as _docset
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    history = History(scene)
+    S.build_sample(history, scene, "townhouse")
+    _docset.generate_docset(scene, building_of(scene), annotations=True)
+    building = building_of(scene)
+    printed, labels = len(scene.dimensions), len(scene.text_labels)
+
+    class _Viewport:
+        def __init__(self):
+            self.scene = scene
+            self.history = history
+
+    out = pathlib.Path(tempfile.mkdtemp()) / "agent.dxf"
+    BimSession(_Viewport()).export_dxf(str(out),
+                                       str(building.stories[0]["id"]))
+
+    assert len(scene.dimensions) == printed, \
+        f"{printed} → {len(scene.dimensions)} kích thước"
+    assert len(scene.text_labels) == labels
+    assert not [k for k in scene.bim_annotations if str(k).startswith("dxf:")]
+
+
+def test_a_failed_build_publishes_no_geometry():
+    """An opening whose host was deleted kept its last solid: the renderer,
+    the HLR and the composer went on drawing a door with no wall, while the
+    panel's banner called that element broken and the takeoff had stopped
+    counting it — the picture and the numbers disagreeing about an element
+    the model itself declares unbuildable."""
+    from core.building import commands as C
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.building.scene_sync import group_for, sync
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    history = History(scene)
+    S.build_sample(history, scene, "townhouse")
+    door = next(e for e in building_of(scene).elements
+                if e.get("type") == "door")
+    host = str((door["params"] or {}).get("host_wall_id"))
+    assert group_for(scene, door["id"]) is not None
+
+    command = C.remove_element(host)
+    command._rebuild = lambda s, b: sync(s, b)
+    history.execute(command)
+
+    sync(scene, building_of(scene), force=True)
+    assert group_for(scene, door["id"]) is None, \
+        "cửa mồ côi vẫn còn hình trong scene"
+    assert any(str(e[0]) == str(door["id"])
+               for e in (scene.building_errors or ())), scene.building_errors
+
+    history.undo()
+    assert group_for(scene, door["id"]) is not None, "Ctrl+Z không trả cửa về"
+
+
+def test_applying_to_the_storey_keeps_each_element_s_own_mark():
+    """The NAME does not travel: it is the element's mark, the office's
+    scheme is what the schedule groups by and the drawing stamps, and
+    copying it turned four doors into one row «D99 ×4»."""
+    import sys
+
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    if QApplication.instance() is None:
+        QApplication(sys.argv[:1])
+    from core.building import commands as C
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.building.scene_sync import sync
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        scene, history = win.viewport.scene, win.viewport.history
+        S.build_sample(history, scene, "townhouse")
+        panel = win.bim_tray.building
+
+        # Name the walls of the storey being drawn: the mark is what the
+        # schedule groups by, so each one must have its own.
+        building = building_of(scene)
+        walls = [e for e in building.elements
+                 if e.get("type") == "wall"
+                 and str(e.get("story_id")) == str(building.stories[0]["id"])]
+        assert len(walls) >= 3, len(walls)
+        marks = {}
+        for index, wall in enumerate(walls):
+            mark = f"T{index + 1}"
+            marks[str(wall["id"])] = mark
+            command = C.set_params(str(wall["id"]), {"name": mark})
+            command._rebuild = lambda s, b: sync(s, b)
+            history.execute(command)
+
+        panel.refresh()
+        target = walls[0]
+        for row in panel._element_rows:
+            if row.data(0, Qt.UserRole) == str(target["id"]):
+                panel.element_tree.setCurrentItem(row)
+        panel._fields["thickness_mm"].setValue(250.0)
+        QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.Yes)
+        panel._on_bulk_apply()
+
+        after = {str(e["id"]): e for e in building_of(scene).elements
+                 if e.get("type") == "wall"
+                 and str(e.get("story_id")) == str(building.stories[0]["id"])}
+        assert {str(e["params"].get("name")) for e in after.values()} == \
+            set(marks.values()), "áp hàng loạt đã xoá mã cấu kiện"
+        assert all(float(e["params"]["thickness_mm"]) == 250.0
+                   for e in after.values()), "thông số hình học không được áp"
+    finally:
+        win.hide()
+
+
+def test_browsing_storeys_is_navigation_not_an_edit():
+    """Each storey click pushed an undo step whose only change was
+    `settings.active_story`: browsing four storeys cost four slots, and the
+    user's next Ctrl+Z undid a navigation they never made."""
+    from PySide6.QtCore import Qt
+
+    from core.building import samples as S
+    from core.building.model import building_of
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        S.build_sample(win.viewport.history, win.viewport.scene, "townhouse")
+        panel = win.bim_tray.building
+        panel.refresh()
+        history = win.viewport.history
+        depth = len(history.undo_stack)
+
+        for row in panel._story_rows:
+            panel.story_tree.setCurrentItem(row)
+
+        assert len(history.undo_stack) == depth, \
+            "duyệt tầng đã đẩy bước hoàn tác"
+        # …and the choice is IN the document, not only the live cache.
+        assert str(building_of(win.viewport.scene).active_story()["id"]) == \
+            str(panel._story_rows[-1].data(0, Qt.UserRole))
+    finally:
+        win.hide()
+
+
+def test_the_plan_bar_s_crop_button_is_enabled():
+    """«Crop region» worked from the menu while its plan-bar button stayed
+    greyed with «công cụ này chưa có trong bản dựng» — the exact lie the
+    disabled entries exist to avoid."""
+    from core.building import samples as S
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        S.build_sample(win.viewport.history, win.viewport.scene, "townhouse")
+        win._on_open_plan_window()
+        plan = win._plan_window
+        assert str(plan._cmd_for_tool("crop")) == "crop"
+        assert plan._tool_available("crop")
+    finally:
+        win.hide()

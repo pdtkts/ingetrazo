@@ -365,6 +365,19 @@ def sheet_index_text(sheets, project: dict | None = None) -> str:
     return "\n".join(lines)
 
 
+def _annotation_scope(view) -> str:
+    """What makes a drawing's annotation key unique.
+
+    The storey's own id when the drawing is of one — two storeys may share
+    a name — otherwise the drawing kind, since a section or an elevation is
+    one per building.
+    """
+    story = str(getattr(view, "story_id", "") or "")
+    if story:
+        return story
+    return str(getattr(view, "kind", "") or "view")
+
+
 def fill_sheet(sheet, view, scene, *, name: str = "", annotations: bool = True,
                building=None, area=None, grid: bool = False):
     """Fill a sheet with one drawing: its frame, and the sheet's own text.
@@ -412,15 +425,24 @@ def fill_sheet(sheet, view, scene, *, name: str = "", annotations: bool = True,
     head.y_mm = margin
     if area is not None:
         area.clear()
+    # The REGISTRY key carries the storey's own id, not just the drawing's
+    # name. Two storeys may legitimately share a name — a house with two
+    # «Tầng» floors is ordinary, and a storey renamed after issue keeps the
+    # sheet it had — and a name-only key made them collide: issuing the
+    # second one POPPED the first one's published dimensions out of the
+    # document, so a sheet showed the floor above's chains and one storey's
+    # annotations were gone for good. The NAME stays on the frame and the
+    # title (a reader sees «Mặt bằng Tầng 1»); only the key is unique.
+    key_base = f"{scene_name}·{_annotation_scope(view)}"
     if building is not None and bool(grid):
         # The axes go down BEFORE the dimensions: a dimension is read
-        # against the grid, and the two annotators both key on the scene
-        # name, so re-issuing replaces both rather than doubling either.
-        _drawings.draw_grid(scene, building, view, key=f"{scene_name}·grid")
+        # against the grid, and the two annotators key alike, so re-issuing
+        # replaces both rather than doubling either.
+        _drawings.draw_grid(scene, building, view, key=f"{key_base}·grid")
     if building is not None and bool(annotations):
-        # The key is the drawing's name: re-issuing this sheet REPLACES what
-        # the previous run wrote instead of stacking a second set on it.
-        _drawings.annotate_plan(scene, building, view, key=scene_name)
+        # Re-issuing this sheet REPLACES what the previous run wrote
+        # instead of stacking a second set on it.
+        _drawings.annotate_plan(scene, building, view, key=key_base)
     scene.version += 1
     return frame
 
