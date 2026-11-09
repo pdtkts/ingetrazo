@@ -36,6 +36,21 @@ def window():
     win.hide()
 
 
+def _generate_through_the_screen(window):
+    """Open the drawing-set window the menu opens, and run it.
+
+    The menu action opens a window (it does not generate by itself), so a
+    test that wants a set has to do what the user does — and asserts
+    against the window it got.
+    """
+    from views.docset_dialog import DocSetDialog
+    from core.building import building_of
+    dlg = DocSetDialog(window, building_of(window.viewport.scene),
+                       window.viewport.scene)
+    dlg._generate()
+    return dlg
+
+
 def _house(win, storeys: int = 2):
     from core.history import History
     from core.building import building_of
@@ -76,7 +91,7 @@ def test_the_pdf_action_writes_the_issued_set(window, tmp_path, monkeypatch):
     building, scene, _history = _house(window)
     monkeypatch.setattr(QMessageBox, "information",
                         staticmethod(lambda *a, **k: None))
-    window._on_generate_docset()
+    _generate_through_the_screen(window)
     drawn = [s for s in scene.compositions
              if any(str(getattr(f, "view_key", "")).startswith("scene:")
                     for f in s.frames)]
@@ -113,16 +128,19 @@ def test_generating_the_docset_from_the_menu_fills_the_sheets(
     monkeypatch.setattr(QMessageBox, "information",
                         staticmethod(lambda *a, **k: told.append(a)))
     started = len(scene.compositions)
-    window._on_generate_docset()
+    dlg = _generate_through_the_screen(window)
     assert len(scene.compositions) > started
     assert any(sheet.frames for sheet in scene.compositions)
     assert not asked, "hồ sơ đủ thì không hỏi gì"
-    assert told, "phải báo đã sinh bao nhiêu tờ"
+    # The result is stated where it is read — in the window's own list.
+    steps = [dlg.step_list.item(i).text()
+             for i in range(dlg.step_list.count())]
+    assert any("Đã sinh" in s for s in steps), steps[-3:]
 
 
-def test_the_menu_asks_before_generating_an_incomplete_set(
+def test_the_menu_states_an_incomplete_set_before_generating(
         window, monkeypatch):
-    """A missing room or wall is stated BEFORE the run, and a No stops it."""
+    """A missing wall is stated BEFORE the run, in the window that runs it."""
     _building, scene, _history = _house(window, storeys=1)
     # A storey with nothing on it: the check calls that a WARNING (a plan
     # with no walls is an empty sheet, which looks like success until it is
@@ -131,16 +149,17 @@ def test_the_menu_asks_before_generating_an_incomplete_set(
     from core.building import building_of
     building = building_of(scene)
     building.elements[:] = []
-    asked: list = []
-    monkeypatch.setattr(QMessageBox, "question",
-                        staticmethod(lambda *a, **k: asked.append(a)
-                                     or QMessageBox.No))
-    monkeypatch.setattr(QMessageBox, "information",
-                        staticmethod(lambda *a, **k: None))
+    from views.docset_dialog import DocSetDialog
+    building = building_of(scene)
+    building.elements[:] = []
     before = list(scene.compositions)
-    window._on_generate_docset()
-    assert asked, "thiếu tường phải hỏi trước khi sinh"
-    assert list(scene.compositions) == before, "trả lời Không thì không sinh"
+    dlg = DocSetDialog(window, building, scene)
+    warnings = [t for t, sev in dlg.issues if sev == "warn"]
+    assert warnings, "thiếu tường phải được nói trước khi sinh"
+    assert any("tường" in t for t in warnings), warnings
+    # …and the run has not happened yet: the screen runs only when asked.
+    assert list(scene.compositions) == before
+    dlg.close()
 
 
 def test_the_check_reports_before_anything_is_written(window, monkeypatch):

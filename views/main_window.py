@@ -3053,10 +3053,8 @@ class MainWindow(QMainWindow):
         if building is None:
             return
         dlg = DocSetDialog(self, building, self.viewport.scene)
-        result = dlg.run()
-        if result is None:
-            return
-        self.viewport.update()
+        dlg.finished.connect(lambda _code: self.viewport.update())
+        dlg.open()
 
     def _on_export_takeoff_csv(self) -> None:
         from core.building import takeoff as _takeoff

@@ -30,9 +30,11 @@ PAPERS = ("A4", "A3", "A2", "A1", "A0")
 class DocSetDialog(QDialog):
     """The whole run in one window: check, options, steps, result.
 
-    :meth:`run` is the entry point the menu calls; it returns the
-    :class:`~core.building.docset.DocSetResult` or ``None`` when the user
-    closed the window before generating.
+    The window is opened NON-modal (``open()``) rather than run in its own
+    event loop: the user may leave it open, pan the model, and run again —
+    and a modal loop would also mean any headless caller of the menu action
+    never gets its turn back. After an accepted run :attr:`docset` holds the
+    :class:`~core.building.docset.DocSetResult`.
     """
 
     def __init__(self, window, building, scene) -> None:
@@ -111,7 +113,7 @@ class DocSetDialog(QDialog):
         self.buttons.addButton(self.go, QDialogButtonBox.AcceptRole)
         self.close_btn = self.buttons.addButton(QDialogButtonBox.Close)
         self.go.clicked.connect(self._generate)
-        self.close_btn.clicked.connect(self.reject)
+        self.close_btn.clicked.connect(self.accept)
 
     def _check(self) -> list:
         from core.building import docset as _docset
@@ -168,11 +170,3 @@ class DocSetDialog(QDialog):
         self._built_ok = True
         self.go.setText(tr("Lập hồ sơ lại"))
 
-    def run(self):
-        """Show the window; return the result, or ``None`` if not generated.
-
-        The window stays open while the user adjusts and re-runs, so what it
-        returns is simply what the last run produced.
-        """
-        self.exec()
-        return self.docset
