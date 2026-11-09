@@ -33,8 +33,13 @@ HEADERS = {
     "zones": ("Tầng", "Số", "Tên phòng", "Loại", "Diện tích (m²)"),
     "openings": ("Tầng", "Loại", "Mã", "Rộng (mm)", "Cao (mm)",
                  "Cao độ đáy (mm)", "Số lượng"),
+    # The wall table states BOTH rules: the gross area a priced bill is
+    # written from, and the deduction that brings it to what the wall
+    # actually is. Two offices reading one report must be able to
+    # reconcile them without a phone call.
     "walls": ("Tầng", "Vật liệu", "Dày (mm)", "Dài (m)", "Cao (m)",
-              "Diện tích (m²)"),
+              "Diện tích (m²)", "Trừ lỗ mở (m²)", "Thực tế (m²)",
+              "Khối tích (m³)"),
     "slabs": ("Tầng", "Vật liệu", "Dày (mm)", "Diện tích (m²)",
               "Thể tích (m³)"),
     "columns": ("Tầng", "Mã", "Tiết diện", "Số lượng", "Thể tích (m³)"),
@@ -125,15 +130,23 @@ def _walls(building, derived):
         mat = schemas.material(params.get("building_material_id"))
         length_m = _num(derived, el, "length_mm") / 1000.0
         height_m = _num(derived, el, "effective_height_mm") / 1000.0
+        gross = _num(derived, el, "gross_area_m2")
+        net = _num(derived, el, "net_area_m2")
         rows.append({
             "Tầng": _story_name(story),
             "Vật liệu": str(mat.get("name") or ""),
             "Dày (mm)": round(float(params.get("thickness_mm", 0.0) or 0.0)),
             "Dài (m)": round(length_m, 2),
             "Cao (m)": round(height_m, 2),
-            # Gross elevation area — the table a priced bill is written from
-            # does not deduct the openings (those are their own line).
-            "Diện tích (m²)": round(_num(derived, el, "gross_area_m2"), 2),
+            # Gross area — what a priced bill is written from, and it does
+            # NOT deduct the openings (those are their own line).
+            "Diện tích (m²)": round(gross, 2),
+            # …and the deduction stated, so the two rules can be checked
+            # against each other instead of argued about: net is what the
+            # wall actually is, gross minus every opening over it.
+            "Trừ lỗ mở (m²)": round(gross - net, 2),
+            "Thực tế (m²)": round(net, 2),
+            "Khối tích (m³)": round(_num(derived, el, "volume_m3"), 3),
         })
     return rows
 
@@ -249,7 +262,12 @@ def _totals(tables_out) -> dict:
 
     openings = tables_out["openings"]
     return {
+        # Gross area (billed) and the wall's real face (net), both totalled:
+        # a bill that quotes gross and a builder who lays brick to net must
+        # be able to reconcile the two from one report.
         "wall_area_m2": total("walls", "Diện tích (m²)"),
+        "wall_net_area_m2": total("walls", "Thực tế (m²)"),
+        "wall_volume_m3": total("walls", "Khối tích (m³)"),
         "slab_area_m2": total("slabs", "Diện tích (m²)"),
         "slab_volume_m3": total("slabs", "Thể tích (m³)"),
         "column_volume_m3": total("columns", "Thể tích (m³)"),

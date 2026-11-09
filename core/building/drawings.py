@@ -554,7 +554,7 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
         return added
 
     if dimensions:
-        for chain in _wall_chains(building, walls):
+        for chain in wall_chains(building, walls):
             stand_off = (offset if offset is not None
                          else (DETAIL_OFFSET_PAPER if len(chain) > 1
                                else TOTAL_OFFSET_PAPER))
@@ -634,8 +634,9 @@ def _clear_annotations(scene, key: str) -> list:
     return gone
 
 
-def _wall_chains(building, walls) -> list:
-    """The two dimension chains of a plan, outside the house.
+def wall_chains(building, walls) -> list:
+    """The two dimension chains of a plan, outside the house (public: the
+    composer, the E2E script and the diff of a revision all read it).
 
     A chain is a list of ``(a, b, side)`` in mm: the ends of every opening
     on the wall (its own two edges) in the detail chain, and the wall's own
