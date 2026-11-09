@@ -55,6 +55,7 @@ from formats import ifc as ifc_format
 from formats import stl as stl_format
 from formats import gltf as gltf_format
 from tools.arc import CenterArcTool, ArcTool, ThreePointArcTool
+from tools.pick_inject import InjectTool, PickTool
 from tools.circle import CircleTool, PolygonTool
 from tools.dimension import DimensionTool
 from tools.eraser import EraserTool
@@ -261,11 +262,24 @@ class _DockDropZone(QWidget):
 
 
 #: Registry command ids the PLAN window runs itself (the 2D drawing and
-#: the lens). They are real commands, so the menu wires them to the plan
-#: instead of greying them out.
-OPEN_PLAN_COMMANDS = frozenset({
-    "dim", "dimension", "level", "text", "label", "grid", "magnifier",
-})
+#: the lens), PLUS the ones the plan's own tool table implements. They are
+#: real commands, so the menu wires them to the plan instead of greying
+#: them out.
+#:
+#: Read from ``draft_tools.DRAFT_TOOLS`` rather than hand-listed: a list
+#: kept here needed an edit every time a drafting tool landed, and until
+#: somebody remembered, a tool that WORKED was shown disabled — the exact
+#: lie the disabled entries exist to avoid.
+def _open_plan_commands() -> frozenset:
+    try:
+        from views import draft_tools
+    except Exception:                              # noqa: BLE001 — no Qt yet
+        return frozenset({"dim", "dimension", "level", "text", "label",
+                          "grid", "magnifier"})
+    return frozenset(set(draft_tools.DRAFT_TOOLS) | {"magnifier"})
+
+
+OPEN_PLAN_COMMANDS = _open_plan_commands()
 
 #: Where a registry command's own id differs from the app's tool key.
 COMMAND_TOOLS_FOR_MENU = {
@@ -291,6 +305,10 @@ class MainWindow(QMainWindow):
 
         self._tools = {
             "select": SelectTool(),
+            # Ống hút / Ống nhả: the same take-and-give gesture the Paint
+            # tool has, for the properties rather than the material.
+            "pick": PickTool(),
+            "inject": InjectTool(),
             "line": LineTool(),
             "freehand": FreehandTool(),
             "rectangle": RectangleTool(),
