@@ -209,9 +209,10 @@ def test_the_linework_lands_on_the_model_not_half_a_storey_away(window):
 def test_a_drag_moves_the_element_and_undo_puts_it_back(window):
     """Dragging the body on the plan moves the model — one undo step.
 
-    The drag runs through the same command the properties panel uses, so
-    Undo must return the wall to its own coordinates, not to a half-state
-    that only looks right on screen.
+    While the drag runs the MODEL IS NOT TOUCHED: rebuilding the geometry
+    of the whole scene takes seconds, so the move is previewed as a ghost
+    on the canvas and committed once, on release. Undo must then return
+    the wall to its own coordinates.
     """
     from core.building import model as M
     from views.plan_window import open_plan_window
@@ -228,10 +229,12 @@ def test_a_drag_moves_the_element_and_undo_puts_it_back(window):
     plan.drag_element(wall_id, (3400.0, 500.0), (3000.0, 0.0), "body")
     plan.drag_element(wall_id, (3500.0, 700.0), (3000.0, 0.0), "body")
     mid = M.building_of(scene).element(wall_id)["params"]["baseline_start_mm"]
-    assert mid == [before[0] + 500.0, before[1] + 700.0], mid
+    assert mid == before, "kéo chỉ xem trước — mô hình đổi khi thả"
+    assert plan.canvas._ghost, "phải có hình xem trước khi kéo"
     plan.finish_drag(wall_id, (3000.0, 0.0), "body")
     after = M.building_of(scene).element(wall_id)["params"]["baseline_start_mm"]
-    assert after == mid, "thả ra không được đổi số"
+    assert after == [before[0] + 500.0, before[1] + 700.0], after
+    assert not plan.canvas._ghost, "thả ra phải bỏ hình xem trước"
     assert history.undo(), "phải có 1 bước undo"
     back = M.building_of(scene).element(wall_id)["params"]["baseline_start_mm"]
     assert back == before, f"undo trả về {back}, không phải {before}"
@@ -305,3 +308,24 @@ def test_an_edit_from_the_plan_reaches_the_3d_and_the_panels(window):
     assert seen, "sửa từ Plan phải phát tín hiệu cho cả app"
     moved = M.building_of(scene).element(wall_id)["params"]["baseline_start_mm"]
     assert moved == [500.0, 0.0], moved
+
+
+def test_delete_takes_the_wall_and_the_openings_in_its_face(window):
+    """Deleting a wall cannot leave an opening behind: a door's numbers
+    are offsets along a wall that would no longer exist."""
+    from core.building import model as M
+    from views.plan_window import open_plan_window
+
+    _b, scene, history = _house(window, storeys=1)
+    plan = open_plan_window(window)
+    building = M.building_of(scene)
+    wall = next(e for e in building.elements if e.get("type") == "wall")
+    door = next(e for e in building.elements if e.get("type") == "door")
+    assert door["params"]["host_wall_id"] == wall["id"]
+    plan.remove_element(str(wall["id"]))
+    after = M.building_of(scene)
+    assert after.element(str(wall["id"])) is None
+    assert after.element(str(door["id"])) is None, "cửa phải đi cùng tường"
+    assert history.undo(), "phải hoàn tác được"
+    assert M.building_of(scene).element(str(wall["id"])) is not None
+    assert M.building_of(scene).element(str(door["id"])) is not None

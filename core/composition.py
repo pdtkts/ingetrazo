@@ -1339,6 +1339,11 @@ class Composicion:
     """One sheet: a page plus its items."""
 
     name: str = "Lámina 1"
+    #: The identity a GENERATED sheet carries (``sheet_plan``'s ``SheetSpec.key``,
+    #: e.g. ``"plan:story-abc"``), or "" for a sheet somebody drew. It is what
+    #: a re-issue reuses and what it may delete: a name can be edited and a
+    #: code is positional, so neither can say «this sheet is mine».
+    bim_key: str = ""
     paper: str = "A4"
     landscape: bool = True
     margin_mm: float = 10.0
@@ -1409,6 +1414,8 @@ class Composicion:
         d = {"name": self.name, "paper": self.paper,
              "landscape": self.landscape, "margin_mm": self.margin_mm,
              "frames": [asdict(f) for f in self.frames]}
+        if self.bim_key:
+            d["bim_key"] = self.bim_key
         if self.border:
             d["border"] = {"on": True, "mm": self.border_mm,
                            "color": self.border_color,
@@ -1443,6 +1450,7 @@ class Composicion:
         know (a sheet saved by a newer IngeTrazo) are dropped, not fatal:
         the model must open whatever the sheets carry."""
         c = cls(name=d.get("name", "Lámina 1"),
+                bim_key=str(d.get("bim_key") or ""),
                 paper=d.get("paper", "A4"),
                 landscape=bool(d.get("landscape", True)),
                 margin_mm=float(d.get("margin_mm", 10.0)))

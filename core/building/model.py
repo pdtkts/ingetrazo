@@ -76,7 +76,15 @@ class Building:
         self.stories.sort(key=lambda s: float(s.get("z_mm", 0.0)))
 
     def story(self, story_id: str) -> dict | None:
-        return next((s for s in self.stories if s["id"] == story_id), None)
+        """The storey row with this id, or ``None``.
+
+        The comparison is tolerant on purpose: a row without an ``id``
+        (a hand-edited payload, an import that carried none) must not take
+        every drawing and every sheet down with a ``KeyError`` — it simply
+        matches nothing.
+        """
+        return next((s for s in self.stories
+                     if str(s.get("id") or "") == str(story_id)), None)
 
     def story_above(self, story_id: str) -> dict | None:
         """The next storey up — what ``top_link == "next"`` binds a wall to."""

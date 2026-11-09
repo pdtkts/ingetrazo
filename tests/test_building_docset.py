@@ -307,3 +307,45 @@ def test_reissuing_does_not_pile_up_cut_planes():
     assert hand in scene.section_planes, "mặt phẳng tự tay tạo phải còn nguyên"
     assert len(scene.section_planes) <= first + 4, \
         "tầng mới chỉ thêm mặt phẳng cho chính nó"
+
+
+def test_the_generator_deletes_its_own_sheets_by_identity_not_by_name():
+    """A sheet is the generator's only if the generator made it.
+
+    Ownership used to be read from the name's ``KT`` prefix, so a note
+    sheet the user named after the project's own numbering was deleted on
+    the next issue. It is now the sheet's own ``bim_key``: an identity the
+    generator writes and nothing else has.
+    """
+    from core.composition import Composicion
+
+    b = _house(1)
+    scene = Scene()
+    DS.generate_docset(scene, b)
+    mine = Composicion(name="KT-ghi chú của tôi")
+    scene.compositions.append(mine)
+    DS.generate_docset(scene, b)
+    assert mine in scene.compositions, "tờ do người dùng đặt tên bị xoá"
+    assert all(getattr(s, "bim_key", "") for s in scene.compositions
+               if s is not mine), "tờ sinh ra phải mang danh tính của nó"
+
+
+def test_a_subset_issue_does_not_delete_the_other_storeys_sheets():
+    """Issuing one storey's sheets must not take the set apart.
+
+    A subset is a re-issue OF those sheets: the others are not part of the
+    request, which is not the same as being superseded. Deleting them
+    would take hand edits with them and renumber the survivors.
+    """
+    from core.building import sheets as _sheets
+
+    b = _house(2)
+    scene = Scene()
+    first = DS.generate_docset(scene, b)
+    assert len(first.sheets) > 4
+    one = b.stories[0]["id"]
+    before = {getattr(s, "bim_key", "") for s in scene.compositions}
+    _sheets.ensure_sheets(scene, b, story_ids=[one],
+                          elevations=False, sections=False)
+    after = {getattr(s, "bim_key", "") for s in scene.compositions}
+    assert before <= after, f"mất tờ của tầng khác: {before - after}"

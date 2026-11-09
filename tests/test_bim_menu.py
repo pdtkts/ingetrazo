@@ -45,7 +45,7 @@ def _generate_through_the_screen(window):
     """
     from views.docset_dialog import DocSetDialog
     from core.building import building_of
-    dlg = DocSetDialog(window, building_of(window.viewport.scene),
+    dlg = DocSetDialog(window, None,
                        window.viewport.scene)
     dlg._generate()
     return dlg
@@ -153,7 +153,7 @@ def test_the_menu_states_an_incomplete_set_before_generating(
     building = building_of(scene)
     building.elements[:] = []
     before = list(scene.compositions)
-    dlg = DocSetDialog(window, building, scene)
+    dlg = DocSetDialog(window, None, scene)
     warnings = [t for t, sev in dlg.issues if sev == "warn"]
     assert warnings, "thiếu tường phải được nói trước khi sinh"
     assert any("tường" in t for t in warnings), warnings
@@ -320,3 +320,22 @@ def test_the_panel_names_an_element_it_could_not_build(window):
     assert panel.warnings.isVisibleTo(panel), "phải hiện cảnh báo"
     assert "không dựng được" in panel.warnings.text()
     assert "tường chủ" in panel.warnings.text()
+
+
+def test_the_docset_window_follows_the_model_after_an_undo(window):
+    """The window is non-modal on purpose: the user may undo while it is
+    open. It must then describe the model as it IS, not the one it was
+    opened for — a cached Building would issue a set for a deleted model."""
+    from core.building import model as M
+    from core.building.commands import add_story
+    from views.docset_dialog import DocSetDialog
+
+    scene = window.viewport.scene
+    before = len(M.building_of(scene).stories)
+    window.viewport.history.execute(add_story("Tầng mới", 0.0, 3300.0))
+    dlg = DocSetDialog(window, scene=scene)
+    assert len(dlg.building.stories) == before + 1
+    window.viewport.history.undo()
+    assert len(dlg.building.stories) == before, \
+        "cửa sổ phải đọc mô hình hiện tại, không phải bản lúc mở"
+    dlg.close()

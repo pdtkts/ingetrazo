@@ -3067,7 +3067,7 @@ class MainWindow(QMainWindow):
         building = self._bim_building()
         if building is None:
             return
-        dlg = DocSetDialog(self, building, self.viewport.scene)
+        dlg = DocSetDialog(self, scene=self.viewport.scene)
         dlg.finished.connect(lambda _code: self.viewport.update())
         dlg.open()
 

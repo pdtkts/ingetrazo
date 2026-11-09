@@ -243,7 +243,7 @@ def _story_marks(building, row) -> tuple:
     if story is None:
         raise ValueError("Công trình chưa có tầng nào.")
     z = float(story.get("z_mm", 0.0))
-    above = building.story_above(str(story["id"]))
+    above = building.story_above(str(story.get("id") or ""))
     top = (float(above.get("z_mm", 0.0)) if above is not None
            else z + float(story.get("height_mm", 3300.0)))
     return story, z, top
@@ -256,7 +256,7 @@ def story_box(building, story) -> tuple:
     outline, a centre — so this asks them all rather than a scene, which
     keeps a drawing's framing available before anything was built.
     """
-    sid = str(story["id"])
+    sid = str(story.get("id") or "")
     xs: list = []
     ys: list = []
     for element in building.elements:
@@ -307,12 +307,22 @@ def view_for(building, row: dict, scale_denom: float | None = None,
                           frame_h_mm, cut=None, trim=None)
     if kind in (KIND_STORY, KIND_ROOF):
         story, z, top = _story_marks(building, row)
+        # The row's own cut wins, then the STOREY's (``STORY_DEFAULTS``
+        # carries both — a stair well or a high room is cut on its own
+        # storey, not on every drawing made of it), then the standard.
+        story_row = building.story(str(row.get("story_id") or "")) or {}
         if kind == KIND_ROOF:
-            cut = _mm_or(row.get("cut_mm"), ROOF_CUT_MM)
-            lower = _mm_or(row.get("cut_bottom_mm"), DEFAULT_CUT_BOTTOM_MM)
+            cut = _mm_or(row.get("cut_mm"),
+                         _mm_or(story_row.get("cut_mm"), ROOF_CUT_MM))
+            lower = _mm_or(row.get("cut_bottom_mm"),
+                           _mm_or(story_row.get("cut_bottom_mm"),
+                                  DEFAULT_CUT_BOTTOM_MM))
         else:
-            cut = _mm_or(row.get("cut_mm"), DEFAULT_CUT_MM)
-            lower = _mm_or(row.get("cut_bottom_mm"), DEFAULT_CUT_BOTTOM_MM)
+            cut = _mm_or(row.get("cut_mm"),
+                         _mm_or(story_row.get("cut_mm"), DEFAULT_CUT_MM))
+            lower = _mm_or(row.get("cut_bottom_mm"),
+                           _mm_or(story_row.get("cut_bottom_mm"),
+                                  DEFAULT_CUT_BOTTOM_MM))
         return _plan_view(building, row, story, z, name, scale_denom,
                           frame_h_mm, cut=cut, trim=z + lower)
     return _directional_view(building, row, kind, name, scale_denom,
@@ -327,7 +337,7 @@ def _plan_view(building, row, story, z, name, scale_denom, frame_h_mm,
     view = DrawingView(
         KIND_ROOF if cut is not None and cut == ROOF_CUT_MM else
         (KIND_STORY if cut is not None else KIND_TOP),
-        name, row, str(story["id"]),
+        name, row, str(story.get("id") or ""),
         target=(cx / 1000.0, cy / 1000.0, z_cut / 1000.0),
         yaw=-math.pi / 2.0, pitch=math.pi / 2.0, up=(0.0, 1.0, 0.0),
         scale_denom=_scale(x1 - x0, y1 - y0, scale_denom, frame_h_mm))
@@ -391,7 +401,7 @@ def _directional_view(building, row, kind, name, scale_denom,
     tall = max(top - (min(z0, z) - 1000.0), 1000.0)
     base = min(z0, z)
     view = DrawingView(
-        kind, name, row, str(story["id"]),
+        kind, name, row, str(story.get("id") or ""),
         target=(mid[0] / 1000.0, mid[1] / 1000.0,
                 (base + tall / 2.0) / 1000.0),
         yaw=0.0, pitch=0.0, up=(0.0, 0.0, 1.0),
@@ -526,7 +536,7 @@ def grid_axes(building, story) -> list:
     splits grids by block and reads them as one plan.
     """
     grids = [e for e in building.elements
-             if str(e.get("story_id")) == str(story["id"])
+             if str(e.get("story_id")) == str(story.get("id") or "")
              and e.get("type") == "grid"]
     if not grids:
         return []
@@ -541,6 +551,12 @@ def grid_axes(building, story) -> list:
     if not all_x or not all_y:
         return []
     margin = float(GRID_MARGIN_MM)
+    # The bubbles stand at the EXTENTS, not at the first and last axis in
+    # the list: a grid whose second family is listed downwards would draw
+    # its line on the wrong side of the first (the builder's own frame
+    # sorts, for the same reason).
+    x_span = (min(all_x) - margin, max(all_x) + margin)
+    y_span = (min(all_y) - margin, max(all_y) + margin)
     for grid in grids:
         params = grid.get("params") or {}
         for axis in params.get("axes") or ():
@@ -548,11 +564,9 @@ def grid_axes(building, story) -> list:
             name = str(axis.get("name") or "").strip()
             off = float(axis.get("offset_mm") or 0.0)
             if d == "x":
-                out.append((name, "x", off, all_x[0] - margin,
-                            all_x[-1] + margin))
+                out.append((name, "x", off, x_span[0], x_span[1]))
             else:
-                out.append((name, "y", off, all_y[0] - margin,
-                            all_y[-1] + margin))
+                out.append((name, "y", off, y_span[0], y_span[1]))
     return out
 
 
@@ -638,7 +652,7 @@ def section_marks(building, story) -> list:
     rows = (building.settings or {}).get("sections") or []
     out: list = []
     for row in rows:
-        if str(row.get("story_id") or "") not in ("", str(story["id"])):
+        if str(row.get("story_id") or "") not in ("", str(story.get("id") or "")):
             continue
         p1 = row.get("p1")
         p2 = row.get("p2")
@@ -666,7 +680,7 @@ def opening_tags(building, story) -> list:
     """
     out: list = []
     for element in building.elements:
-        if str(element.get("story_id")) != str(story["id"]):
+        if str(element.get("story_id")) != str(story.get("id") or ""):
             continue
         if element.get("type") not in ("door", "window"):
             continue
@@ -740,7 +754,7 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
     _ensure_layer(scene, ANNOT_LAYER)
 
     walls = [e for e in building.elements
-             if str(e.get("story_id")) == str(story["id"])
+             if str(e.get("story_id")) == str(story.get("id") or "")
              and e.get("type") == "wall"]
     if not walls:
         return added
@@ -811,7 +825,7 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
 
     if rooms:
         for zone in [e for e in building.elements
-                     if str(e.get("story_id")) == str(story["id"])
+                     if str(e.get("story_id")) == str(story.get("id") or "")
                      and e.get("type") == "zone"]:
             outline = (zone.get("params") or {}).get("outline_mm") or []
             if len(outline) < 3:

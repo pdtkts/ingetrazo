@@ -119,9 +119,12 @@ def sheet_plan(building, story_ids=None, *, elevations: bool = True,
     :data:`GROUP_NEEDS`. The result is deterministic — same model, same set
     — which is what makes a re-issue comparable with the last one.
     """
+    # A storey with no id is not issued (there is nothing to key its sheet
+    # on); one with an id the caller asked for is.
     stories = [s for s in building.stories
-               if story_ids is None or str(s["id"]) in
-               {str(i) for i in story_ids}]
+               if str(s.get("id") or "")
+               and (story_ids is None
+                    or str(s["id"]) in {str(i) for i in story_ids})]
     out: list = []
     counters: dict = {}
     requested = {"elevations": bool(elevations), "sections": bool(sections)}
@@ -139,7 +142,7 @@ def sheet_plan(building, story_ids=None, *, elevations: bool = True,
                     group=group,
                     label=f"{label} {story.get('name') or ''}".strip(),
                     title=f"{label} — {story.get('name') or ''}".strip(),
-                    story_id=str(story["id"]),
+                    story_id=str(story.get("id") or ""),
                 ))
         else:
             needs = GROUP_NEEDS.get(group)
@@ -220,41 +223,82 @@ def ensure_sheets(scene, building, project=None, story_ids=None,
     project = dict(project or building.project or {})
     specs = sheet_plan(building, story_ids, elevations=elevations,
                        sections=sections)
-    by_name = {str(c.name): c for c in scene.compositions}
+    # Reuse by the sheet's OWN identity, never by its name: a name can be
+    # edited and a code is positional, so inserting a storey would renumber
+    # the sheets below it and leave last issue's set behind beside the new
+    # one, doubling the document. Sheets issued before the key existed are
+    # adopted by name once, so an old file is upgraded rather than doubled.
+    known: dict = {}
+    by_name: dict = {}
+    for sheet in scene.compositions:
+        key = str(getattr(sheet, "bim_key", "") or "")
+        if key and key not in known:
+            known[key] = sheet
+        elif not key:
+            by_name.setdefault(str(sheet.name), sheet)
     made: list = []
     for index, spec in enumerate(specs, start=1):
         code = sheet_code(spec, index)
         name = f"{code} {spec.title}"
-        sheet = by_name.get(name)
+        sheet = known.get(spec.key)
+        if sheet is None:
+            sheet = by_name.get(name)
+            if sheet is not None:
+                known[spec.key] = sheet
         if sheet is None:
             sheet = Composicion(name=name, paper=paper,
                                 landscape=bool(landscape))
             scene.compositions.append(sheet)
-            by_name[name] = sheet
+        # The code is positional, so a sheet reused for the same identity
+        # still has to take the code this issue gives it — otherwise the
+        # set carries last issue's numbers beside the new ones and two
+        # sheets end up with the same code.
+        sheet.bim_key = spec.key
+        sheet.name = name
         sheet.paper = paper
         sheet.landscape = bool(landscape)
         title_block(sheet, project, spec, code,
                     revision=str(project.get("revision") or ""))
         made.append(sheet)
-    _drop_superseded_sheets(scene, made)
+    _drop_superseded_sheets(scene, [spec.key for spec in specs], made)
     scene.version += 1
     return made
 
 
-def _drop_superseded_sheets(scene, made) -> list:
+def _drop_superseded_sheets(scene, asked_for, made) -> list:
     """Remove the sheets of a previous issue that the plan no longer asks for.
 
-    Only sheets that LOOK like this set's (a ``KT`` code) are considered:
-    a sheet the user drew by hand is not the generator's to delete.
+    Ownership is the sheet's own ``bim_key``, never its name: a sheet whose
+    name merely starts with the code prefix (``KT``) may well be the user's
+    — a note sheet named after the project's own numbering — and deleting
+    it would lose work nobody asked to lose.
+
+    ``asked_for`` is what THIS issue covers, which is not what the set
+    holds: issuing one storey is a re-issue of that storey's sheets, and
+    the other storeys' sheets are neither part of the request nor
+    superseded by it. So the scene remembers every identity it has been
+    asked for, and a sheet goes only when its identity is in none of them.
     """
+    seen = getattr(scene, "_bim_sheet_keys", None)
+    if not isinstance(seen, set):
+        seen = {str(getattr(s, "bim_key", "") or "")
+                for s in scene.compositions}
+        seen.discard("")
+    seen.update(str(key) for key in asked_for)
+    scene._bim_sheet_keys = seen
     keep = {id(sheet) for sheet in made}
     gone = [sheet for sheet in scene.compositions
             if id(sheet) not in keep
-            and str(getattr(sheet, "name", "")).startswith(f"{SHEET_PREFIX}")]
+            and str(getattr(sheet, "bim_key", "") or "")
+            and str(sheet.bim_key) not in seen]
     if not gone:
         return []
+    # Identity comparison, not the dataclass' own ``__eq__``: two sheets
+    # with equal FIELDS are still two different sheets, and comparing by
+    # value on every pair is quadratic besides.
+    ids = {id(sheet) for sheet in gone}
     scene.compositions[:] = [sheet for sheet in scene.compositions
-                             if sheet not in gone]
+                             if id(sheet) not in ids]
     return gone
 
 

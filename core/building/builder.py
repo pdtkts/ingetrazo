@@ -485,7 +485,15 @@ def joins_for_story(building, story_id: str) -> dict:
 
 
 def _joins_fingerprint(building, story_id: str):
-    """A hashable digest of what the join solver reads on one storey."""
+    """A hashable digest of what the join solver reads on one storey.
+
+    Everything ``join_input`` reads has to be in here, or the cache serves
+    a trim the solver would no longer produce: the baselines, the faces'
+    signed offsets (which is where ``reference_line``, ``flip_side`` and
+    the thickness land), the priority, and the storey's own z AND the
+    wall's effective height, because both ends of the extent the solver
+    compares move with them.
+    """
     story = building.story(story_id)
     z = float((story or {}).get("z_mm", 0.0))
     parts: list = [("z", z), ("stories", len(building.stories))]
@@ -495,8 +503,12 @@ def _joins_fingerprint(building, story_id: str):
                    (params.get("baseline_start_mm") or (0.0, 0.0))[:2])
         p1 = tuple(round(float(v), 3) for v in
                    (params.get("baseline_end_mm") or (0.0, 0.0))[:2])
+        from core.building.planar import side_offsets
+        lo, hi = side_offsets(params)
         parts.append((str(el.get("id")), p0, p1,
-                      round(float(params.get("thickness_mm", 200.0) or 0.0), 3),
+                      round(float(lo), 3), round(float(hi), 3),
+                      round(effective_height(building, params, story), 3),
+                      round(float(params.get("base_offset_mm", 0.0) or 0.0), 3),
                       int(schemas.priority_of(params))))
     return tuple(parts)
 

@@ -37,12 +37,16 @@ class DocSetDialog(QDialog):
     :class:`~core.building.docset.DocSetResult`.
     """
 
-    def __init__(self, window, building, scene) -> None:
+    def __init__(self, window, building=None, scene=None) -> None:
         super().__init__(window)
         self.setWindowTitle(tr("Lập hồ sơ tự động"))
         self.window = window
-        self.building = building
-        self.scene = scene
+        #: The BUILDING IS RESOLVED AT USE, never held: the window is
+        #: non-modal, so the user can undo while it stands open, and the
+        #: cached Building would then describe a model that no longer
+        #: exists — its own docstring invites exactly that workflow.
+        self.scene = scene if scene is not None else window.viewport.scene
+        del building
         self.docset = None
         self._built_ok = False
 
@@ -90,7 +94,7 @@ class DocSetDialog(QDialog):
         # ---- which storeys are in this issue -----------------------------
         lay.addWidget(QLabel(tr("Tầng phát hành:")))
         stories = QHBoxLayout()
-        for story in building.stories or ():
+        for story in self.building.stories or ():
             box = QCheckBox(str(story.get("name") or story.get("id")))
             box.setChecked(True)
             stories.addWidget(box)
@@ -114,6 +118,13 @@ class DocSetDialog(QDialog):
         self.close_btn = self.buttons.addButton(QDialogButtonBox.Close)
         self.go.clicked.connect(self._generate)
         self.close_btn.clicked.connect(self.accept)
+
+    @property
+    def building(self):
+        """The live building, asked for at every use (never held)."""
+        from core.building.model import building_of
+
+        return building_of(self.scene)
 
     def _check(self) -> list:
         from core.building import docset as _docset

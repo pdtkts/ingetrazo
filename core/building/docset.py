@@ -192,9 +192,14 @@ def generate_docset(scene, building, project=None, story_ids=None,
                 ("wall", "Mặt bằng tường", "wall", None),
                 ("floor", "Mặt bằng lát sàn", "slab", None),
                 ("ceiling", "Mặt bằng trần", "ceiling", "ceiling")):
+            # By the sheet's own identity, never its name: two storeys can
+            # be called the same thing ("Tầng"), and a name match then
+            # hands both of them the first sheet and leaves the other set
+            # blank.
+            wanted = f"{key}:{sid}"
             sheet = next((s for s in made
-                          if _sheets_code_group(s) == key
-                          and story_name in str(s.name)), None)
+                          if str(getattr(s, "bim_key", "") or "") == wanted),
+                         None)
             if sheet is None:
                 continue
             row = {"kind": "story", "story_id": sid,
@@ -318,8 +323,11 @@ def generate_docset(scene, building, project=None, story_ids=None,
     # opening and the cut agree with the sheet it was taken from.
     detail_sheet = next((s for s in made
                          if _sheets_code_group(s) == "detail"), None)
+    # The sheet is issued when the model has a DOOR OR A WINDOW
+    # (``GROUP_NEEDS["detail"]``), so the crop must accept either: a
+    # windows-only model got a blank detail sheet, silently.
     first_door = next((e for e in building.elements
-                       if e.get("type") == "door"), None)
+                       if e.get("type") in ("door", "window")), None)
     if detail_sheet is not None and first_door is not None:
         label = _sheet_view_label(detail_sheet)
         source = _drawings.view_for(

@@ -185,6 +185,42 @@ def set_project(values: dict, rebuild=None) -> BuildingEdit:
     return BuildingEdit(mutate, rebuild)
 
 
+def changed_element_ids(before_payload, building):
+    """The ids whose rows differ between a stored payload and the model.
+
+    A command keeps the payload as it stood before its step (what Undo
+    restores), so «what did this step touch» is a diff of two dicts rather
+    than a guess — the answer a targeted geometry rebuild needs. An
+    opening's geometry is the WALL's business, so a changed opening brings
+    its host wall along. ``None`` means «cannot tell»: the caller should
+    rebuild everything.
+    """
+    import json
+
+    if not isinstance(before_payload, dict):
+        return None
+    was = {str(e.get("id")): e
+           for e in (before_payload.get("elements") or ())}
+    ids: set = set()
+
+    def row_key(row):
+        return (str(row.get("type")), str(row.get("story_id")),
+                json.dumps(row.get("params") or {}, sort_keys=True,
+                           ensure_ascii=False))
+
+    for element in building.elements:
+        eid = str(element.get("id"))
+        old = was.pop(eid, None)
+        if old is None or row_key(old) != row_key(element):
+            ids.add(eid)
+    ids.update(was)                             # removed elements
+    for element in building.elements:
+        host = str((element.get("params") or {}).get("host_wall_id") or "")
+        if host and host in ids:
+            ids.add(str(element.get("id")))
+    return ids
+
+
 def commit(history, command: BuildingEdit) -> None:
     """Run a building command through the host's history (one undo step)."""
     history.execute(command)
