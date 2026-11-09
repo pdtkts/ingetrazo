@@ -108,6 +108,32 @@ def group_for(scene, element_id: str):
     return None
 
 
+#: Whether geometry regeneration is held off (the «Tạm dừng BIM» switch).
+#: Module state rather than a scene flag on purpose: it is a property of
+#: THIS SESSION's patience with the machine, not of the document — a file
+#: saved while building a heavy insertion must not open paused for a
+#: colleague.
+_PAUSED: bool = False
+
+
+def set_paused(paused: bool) -> None:
+    """Hold off (or release) geometry regeneration. See :func:`paused`."""
+    global _PAUSED
+    _PAUSED = bool(paused)
+
+
+def paused() -> bool:
+    """Whether geometry regeneration is currently held off.
+
+    A PAUSE that only stopped the menu would be a lie: the parameter
+    edits, the building panel and the AI bridge all rebuild through this
+    module, so every caller asks THIS, and the release path rebuilds
+    everything at once — the model is never allowed to drift from the
+    picture, only to catch up later.
+    """
+    return bool(_PAUSED)
+
+
 def sync(scene, building=None, element_ids=None, force: bool = False):
     """Bring the scene's geometry in line with the building's parameters.
 
@@ -115,8 +141,12 @@ def sync(scene, building=None, element_ids=None, force: bool = False):
     host them); ``force`` rebuilds even when the signature matches — what a
     load-from-disk or a material change needs.
 
-    Returns ``(built, removed)`` element counts.
+    Returns ``(built, removed)`` element counts. While :func:`paused`, the
+    call does NOTHING and reports ``(0, 0)``: the parameters are already in
+    the model, and the release path rebuilds from them.
     """
+    if _PAUSED and not force:
+        return 0, 0
     building = building or building_model.building_of(scene)
     wanted = {str(el["id"]) for el in building.elements}
     removed = 0

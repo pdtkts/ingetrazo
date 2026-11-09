@@ -3147,6 +3147,51 @@ class MainWindow(QMainWindow):
         office_action.triggered.connect(self._on_office)
         menu.addAction(office_action)
 
+        # ---- Nâng cao: the maintenance a long job needs ----------------
+        # Each of these acts on the DOCUMENT or answers a question about
+        # it, and each is written to be run mid-job, so none of them
+        # blocks: a rebuild reports its counts, the check reports what it
+        # found, and the lag meter reports numbers.
+        menu.addSeparator()
+        advanced = QMenu(tr("Nâng cao"), menu)
+        self._bim_advanced = advanced
+
+        rebuild_action = QAction(tr("Dựng lại mô hình (nối tường)"), advanced)
+        rebuild_action.setStatusTip(tr(
+            "Dựng lại toàn bộ hình học từ tham số cấu kiện — dùng khi "
+            "tường chưa nối đúng ở góc, sau khi dán cấu kiện từ tài liệu "
+            "khác, hoặc khi hình trên màn hình nghi ngờ không khớp số "
+            "liệu. Không đổi mô hình: chỉ dựng lại hình."))
+        rebuild_action.triggered.connect(self._on_rebuild_building)
+        advanced.addAction(rebuild_action)
+
+        verify_action = QAction(tr("Kiểm tra DXF đã xuất…"), advanced)
+        verify_action.setStatusTip(tr(
+            "Đọc lại một file DXF đã xuất và đối chiếu với mô hình: thiếu "
+            "lớp, thiếu hatch, kích thước lệch — những lỗi chỉ thấy được "
+            "khi file đã rời khỏi app."))
+        verify_action.triggered.connect(self._on_verify_dxf)
+        advanced.addAction(verify_action)
+
+        lag_action = QAction(tr("Đo lag…"), advanced)
+        lag_action.setStatusTip(tr(
+            "Đo thời gian dựng lại hình của mô hình đang mở: số cấu kiện, "
+            "thời gian dựng hình, thời gian mở cửa sổ Plan — số liệu để "
+            "biết máy còn theo được mô hình hay không."))
+        lag_action.triggered.connect(self._on_measure_lag)
+        advanced.addAction(lag_action)
+
+        self._pause_action = QAction(tr("Tạm dừng BIM"), advanced)
+        self._pause_action.setCheckable(True)
+        self._pause_action.setStatusTip(tr(
+            "Tạm dừng việc dựng lại hình học BIM trong khi vẽ tự do: mọi "
+            "thao tác vẫn ghi vào mô hình, nhưng hình chỉ dựng lại khi bật "
+            "lại — dùng khi chen một đoạn dựng hình nặng."))
+        self._pause_action.toggled.connect(self._on_toggle_pause_bim)
+        advanced.addAction(self._pause_action)
+
+        menu.addMenu(advanced)
+
     # ---- BIM menu actions ---------------------------------------------------
 
     def _on_project_info(self) -> None:
@@ -3154,6 +3199,132 @@ class MainWindow(QMainWindow):
         from views.project_dialog import open_project_info
 
         open_project_info(self)
+
+    # ---- Nâng cao: the maintenance a long job needs ---------------------
+
+    def _bim_paused(self) -> bool:
+        """Whether BIM geometry regeneration is held off right now.
+
+        A PAUSE that only stopped the menu would be a lie: the parameter
+        edits, the panel and the AI bridge all rebuild through
+        ``scene_sync``. They ask THIS, so one switch covers them all, and
+        the geometry is rebuilt the moment the switch goes back on — the
+        model was never allowed to drift from the picture.
+        """
+        return bool(getattr(self, "_bim_hold", False))
+
+    def _on_toggle_pause_bim(self, paused: bool) -> None:
+        """Hold BIM geometry regeneration, or release it and catch up."""
+        from PySide6.QtWidgets import QMessageBox
+
+        self._bim_hold = bool(paused)
+        from core.building import scene_sync as _sync
+
+        _sync.set_paused(bool(paused))
+        if not paused:
+            building = self._bim_building()
+            if building is not None:
+                built = _sync.rebuild_all(self.viewport.scene, building)
+                self.viewport.notify_scene_changed()
+                QMessageBox.information(
+                    self, tr("Tạm dừng BIM"),
+                    tr("Đã bật lại — dựng lại %d cấu kiện.") % built)
+            return
+        QMessageBox.information(
+            self, tr("Tạm dừng BIM"),
+            tr("Đang tạm dừng: sửa tham số vẫn ghi vào mô hình, nhưng hình "
+               "học chưa dựng lại cho tới khi bật lại."))
+
+    def _on_rebuild_building(self) -> None:
+        """Dựng lại mô hình: every element's geometry, from its parameters."""
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from core.building import scene_sync as _sync
+
+        building = self._bim_building()
+        if building is None:
+            return
+        QApplication.processEvents()
+        built = _sync.rebuild_all(self.viewport.scene, building)
+        self.viewport.notify_scene_changed()
+        QMessageBox.information(
+            self, tr("Dựng lại mô hình"),
+            tr("Đã dựng lại %d cấu kiện từ %d tầng. Hình học nay khớp "
+               "tham số — mô hình không đổi.")
+            % (built, len(building.stories)))
+
+    def _on_measure_lag(self) -> None:
+        """Đo lag: what this model costs this machine, in numbers.
+
+        Measured on the LIVE document rather than a bench script, because
+        the question a user asks mid-job is «is MY file the problem» — a
+        number taken anywhere else answers a different question.
+        """
+        import time
+
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from core.building import scene_sync as _sync
+        from core.building.model import building_of
+
+        building = self._bim_building()
+        if building is None:
+            return
+        scene = self.viewport.scene
+        QApplication.processEvents()
+
+        t0 = time.perf_counter()
+        _sync.sync(scene, building, force=True)
+        rebuild_s = time.perf_counter() - t0
+
+        faces = 0
+        for group in scene.groups:
+            mesh = getattr(group, "mesh", None)
+            faces += len(getattr(mesh, "faces", ()) or ())
+
+        t0 = time.perf_counter()
+        self.viewport.notify_scene_changed()
+        QApplication.processEvents()
+        paint_s = time.perf_counter() - t0
+
+        elements = len(building.elements)
+        QMessageBox.information(
+            self, tr("Đo lag"),
+            tr("Mô hình này: %d cấu kiện, %d tầng, %d mặt.\n"
+               "Dựng lại toàn bộ: %.2f s\nVẽ lại màn hình: %.2f s")
+            % (elements, len(building.stories), faces, rebuild_s, paint_s))
+
+    def _on_verify_dxf(self) -> None:
+        """Kiểm tra DXF: read an exported file back and compare it."""
+        from PySide6.QtWidgets import QMessageBox
+        from views.filedialogs import file_dialogs
+
+        building = self._bim_building()
+        if building is None:
+            return
+        path, _flt = file_dialogs.getOpenFileName(
+            self, tr("Kiểm tra DXF đã xuất"), "", tr("DXF (*.dxf)"))
+        if not path:
+            return
+        from formats.dxf_check import check_dxf_against
+
+        try:
+            report = check_dxf_against(path, self.viewport.scene, building)
+        except Exception as exc:                    # noqa: BLE001 — reported
+            QMessageBox.warning(self, tr("Kiểm tra DXF"),
+                                f"{type(exc).__name__}: {exc}")
+            return
+        if not report["problems"]:
+            QMessageBox.information(
+                self, tr("Kiểm tra DXF"),
+                tr("File khớp mô hình: %d nét, %d hatch, %d kích thước, "
+                   "%d chữ, %d lớp — không thiếu gì.")
+                % (report["counts"]["lines"], report["counts"]["hatch"],
+                   report["counts"]["dimensions"], report["counts"]["text"],
+                   report["counts"]["layers"]))
+            return
+        QMessageBox.warning(
+            self, tr("Kiểm tra DXF"),
+            tr("File KHÁC mô hình ở %d điểm:") % len(report["problems"])
+            + "\n" + "\n".join(f"• {t}" for t in report["problems"][:12]))
 
     def _bim_building(self):
         """The live building, or None with a word to the user."""
