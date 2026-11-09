@@ -326,6 +326,12 @@ class MainWindow(QMainWindow):
         self._tools["change_axes"] = ChangeAxesTool()
         from tools.scale_manager import ScaleManagerTool
         self._tools["scale_manager"] = ScaleManagerTool()
+        # The BIM tools (tools/building_tools.py): each records the element's
+        # parameters and lets core.building.scene_sync build the solid, so an
+        # edit later moves the drawings and the quantities with it.
+        from tools.building_tools import BIM_TOOLS
+        for key, cls in BIM_TOOLS:
+            self._tools[key] = cls()
         # Tag each tool with its icon key so the viewport can turn the mouse
         # pointer into the tool's icon (tool-shaped cursors).
         for key, tool in self._tools.items():
@@ -979,8 +985,12 @@ class MainWindow(QMainWindow):
         if comp is not None and hasattr(comp, "set_toolbar_icon_size"):
             comp.set_toolbar_icon_size(px)
 
-    def _add_tool_button(self, tb: QToolBar, key: str) -> QAction:
-        tool = self._tools[key]
+    def _add_tool_button(self, tb: QToolBar, key: str) -> QAction | None:
+        tool = self._tools.get(key)
+        if tool is None:
+            # A toolbar may name a tool this build does not have (a feature
+            # staged behind another): skip it rather than fail to start.
+            return None
         name = tr(tool.name)
         action = QAction(tool_icon(key), name, self)
         self._icon_actions.append((action, key))
@@ -1020,6 +1030,10 @@ class MainWindow(QMainWindow):
             ("modify", tr("Modify"), ["pushpull", "move", "rotate", "scale", "flip", "followme", "offset", "fillet"]),
             ("annotate", tr("Annotate"), ["tape", "protractor", "dimension", "text", "geopath"]),
             ("sections", tr("Sections"), ["section"]),
+            # The BIM design tools, in the reference group order.
+            ("bim", tr("BIM"),
+             ["wall", "curtain_wall", "column", "beam", "slab", "ceiling",
+              "roof", "stair", "zone", "door", "window", "fixture"]),
             # The Solid Tools toolbar, in the usual order.
             ("solids", tr("Solid Tools"),
              ["outer_shell", "solid_union", "solid_subtract", "solid_trim",

@@ -5017,9 +5017,16 @@ class BimTray(QDockWidget):
                          | QDockWidget.DockWidgetFloatable
                          | QDockWidget.DockWidgetClosable)
         self.bim = BimPanel(window)
-        self.setWidget(_scrolled([(tr("BIM tagging"), self.bim)]))
+        # The parametric model and its tagging sit in one workspace: the
+        # building panel edits parameters, the tagging panel reads the
+        # takeoff off whatever geometry is there.
+        from views.building_panel import BuildingPanel
+        self.building = BuildingPanel(window)
+        self.setWidget(_scrolled([(tr("Building"), self.building),
+                                  (tr("BIM tagging"), self.bim)]))
 
     def on_scene_changed(self) -> None:
+        self.building.refresh()
         self.bim.refresh()
 
 
