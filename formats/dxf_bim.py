@@ -406,6 +406,35 @@ def _drawing_key(scene, view):
         for key in registry:
             if str(key) == candidate or str(key).endswith(f":{candidate}"):
                 return str(key)
+    # The DRAWING SET files each storey's annotations under the SHEET's
+    # name, not under the storey id — so a storey export from a document
+    # the set has issued finds no key of its own and would fall back to
+    # «everything the document holds», printing the floor above's levels
+    # on this plan. The sheet names carry the storey's own name, which is
+    # the last thing that reliably identifies them.
+    story = str(getattr(view, "story_id", "") or "")
+    if story:
+        building = None
+        try:
+            from core.building.model import building_of
+
+            building = building_of(scene)
+        except Exception:                        # noqa: BLE001 — optional
+            building = None
+        story_name = ""
+        if building is not None:
+            row = building.story(story) or {}
+            story_name = str(row.get("name") or "")
+        if story_name:
+            # A sheet names its drawing «Mặt bằng <storey>», and the
+            # registry key is that whole name: the match is by the
+            # storey's own name as a whole word, never a substring, so
+            # «Tầng 1» cannot answer for «Tầng 11».
+            for key in registry:
+                parts = str(key).replace("—", " ").split()
+                if story_name.split() and \
+                        all(word in parts for word in story_name.split()):
+                    return str(key)
     return None
 
 

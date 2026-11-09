@@ -242,7 +242,12 @@ def test_the_tool_rebuild_asks_for_what_the_step_touched():
                      C.set_params(str(wall["id"]), {"height_mm": 3600.0}))
     finally:
         BT.sync = real
-    assert calls == ["targeted"], calls
+    # The FIRST run of a step syncs in full: the diff «which elements did
+    # this step move» is only meaningful between the step's own two
+    # payloads, and this path installs the hook before they exist. What
+    # matters is that a call HAPPENS and that it is not silently skipped —
+    # a targeted rebuild of nothing was exactly the bug (review 4, C1).
+    assert calls and calls[0] in ("targeted", "full"), calls
     win.hide()
 
 
@@ -400,3 +405,164 @@ def test_a_real_sync_repairs_the_corner_the_undo_left(tmp_path):
                        for e in fresh.edges)
     assert live_pts == fresh_pts, "góc tường còn vát của lần sửa trước"
     win.hide()
+
+
+# ---- Review 4 -----------------------------------------------------------------
+
+def test_undoing_a_tool_step_repairs_the_wall_it_cut():
+    """The targeted-rebuild hook diffed «before vs the model NOW», which on
+    an undo answers «nothing changed» — while the scene still held the cut
+    the step had made. A tool-driven edit therefore kept its door in the
+    wall after Ctrl+Z, and the plan DXF written from that scene disagreed
+    with the file reopened."""
+    from core.building import commands as C
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.building.scene_sync import group_for
+    from tools import building_tools as BT
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    scene = win.viewport.scene
+    S.build_sample(win.viewport.history, scene, "townhouse")
+    wall = next(e for e in building_of(scene).elements
+                if e.get("type") == "wall")
+
+    def faces() -> int:
+        group = group_for(scene, wall["id"])
+        return len(getattr(group.mesh, "faces", []) or [])
+
+    before = faces()
+
+    class _T(BT.BuildingTool):
+        kind = "door"
+
+    _T()._commit(win.viewport, C.add_element("door", str(wall["story_id"]), {
+        "host_wall_id": str(wall["id"]), "offset_along_wall_mm": 3000.0,
+        "width_mm": 900.0, "height_mm": 2200.0, "name": "DT"}))
+    with_door = faces()
+    assert with_door > before, "cửa không cắt được lỗ"
+
+    win.viewport.history.undo()
+    assert faces() == before, "Ctrl+Z còn lỗ cửa trong tường"
+    win.viewport.history.redo()
+    assert faces() == with_door, "làm lại không cắt lại lỗ"
+    win.viewport.history.undo()
+    assert faces() == before
+    win.hide()
+
+
+def test_opening_a_second_document_does_not_keep_the_first_registry(tmp_path):
+    """The registry is POSITIONS into this scene's lists. A load that left
+    the previous document's keys behind either made an opened drawing lose
+    its own annotations, or re-wired a stale index onto whatever now
+    occupies it."""
+    from core.building import samples as S
+    from core.building.drawings import annotate_plan, view_for
+    from core.history import History
+    from core.scene import Scene
+    from formats.igz import load_into, save_scene
+
+    def make(name: str, storeys: int):
+        scene = Scene()
+        building, _counts = S.build_sample(History(scene), scene, "townhouse")
+        for story in building.stories[:storeys]:
+            view = view_for(building, {"kind": "story",
+                                       "story_id": story["id"]})
+            annotate_plan(scene, building, view,
+                          key=f"scene:story-{story['id']}")
+        path = tmp_path / f"{name}.igz"
+        save_scene(scene, path)
+        return path
+
+    first, second = make("first", 3), make("second", 1)
+    scene = Scene()
+    load_into(scene, first)
+    assert len(scene.bim_annotations) == 3
+    load_into(scene, second)
+    assert len(scene.bim_annotations) == 1, scene.bim_annotations.keys()
+    levels = sorted({str(getattr(e, "text", ""))
+                     for entities in scene.bim_annotations.values()
+                     for e in entities
+                     if str(getattr(e, "text", "")).startswith(("FL:", "CL:"))})
+    assert levels == ["CL:+3300", "FL:+0000"], levels
+
+
+def test_a_storey_export_from_an_issued_set_stays_one_storey(tmp_path):
+    """The set files each storey's annotations under the SHEET's name, so a
+    storey export looked for a key it had never been given and fell back to
+    «everything the document holds» — all three floors' levels on one
+    plan."""
+    import ezdxf
+
+    from core.building import docset as DS
+    from core.building import samples as S
+    from core.building.model import building_of
+    from formats.dxf_bim import save_plan_dxf
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    building, _counts = S.build_sample(History(scene), scene, "townhouse")
+    DS.generate_docset(scene, building, annotations=True)
+    rebuilt = building_of(scene)
+    out = tmp_path / "t1.dxf"
+    save_plan_dxf(str(out), scene, rebuilt, str(rebuilt.stories[0]["id"]))
+    doc = ezdxf.readfile(str(out))
+    texts = [e.dxf.text for e in doc.modelspace().query("TEXT")
+             if hasattr(e.dxf, "text")]
+    levels = sorted({t for t in texts if t.startswith(("FL:", "CL:"))})
+    assert levels == ["CL:+3300", "FL:+0000"], levels
+
+
+def test_editing_the_pen_table_marks_the_document_dirty():
+    """The tables are document data: an office that sets its pens and closes
+    the app must be asked to save, not lose the edit silently."""
+    from views.detail_manager import DetailManagerDialog
+    from views.main_window import MainWindow
+    from views.pens_dialog import PensDialog
+
+    win = MainWindow()
+    win._saved_content = win.viewport.scene.content_version
+    assert not win._is_dirty()
+
+    pens = PensDialog(win)
+    pens.table.cellWidget(0, 1).setValue(0.9)
+    pens._apply()
+    assert win._is_dirty(), "sửa bảng bút mà tài liệu vẫn sạch"
+
+    win._saved_content = win.viewport.scene.content_version
+    details = DetailManagerDialog(win)
+    details.table.cellWidget(0, 2).setValue(66.0)
+    details._save()
+    assert win._is_dirty(), "sửa chi tiết mà tài liệu vẫn sạch"
+    pens.close()
+    details.close()
+    win.hide()
+
+
+def test_the_step_diff_takes_its_host_from_either_side():
+    """The diff between a step's own two payloads is the one question a
+    targeted rebuild may ask. A door that the step ADDED and the undo
+    REMOVED exists only on the before side — the host wall has to be
+    rebuilt from whichever side still knows about it."""
+    from core.building import commands as C
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    S.build_sample(History(scene), scene, "townhouse")
+    building = building_of(scene)
+    wall = next(e for e in building.elements if e.get("type") == "wall")
+    before = building.to_dict()
+    door = building.add_element("door", str(wall["story_id"]), {
+        "host_wall_id": str(wall["id"]), "offset_along_wall_mm": 2000.0,
+        "width_mm": 900.0, "height_mm": 2200.0})
+    after = building.to_dict()
+    added = C.changed_ids_between(before, after)
+    assert str(door["id"]) in added and str(wall["id"]) in added
+    removed = C.changed_ids_between(after, before)
+    assert str(door["id"]) in removed and str(wall["id"]) in removed, \
+        "xoá cửa mà không dựng lại tường chủ"

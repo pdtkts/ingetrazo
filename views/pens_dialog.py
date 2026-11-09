@@ -142,6 +142,11 @@ class PensDialog(QDialog):
                     else "").strip()
             if name and name != standard:
                 renames[standard] = name
+        # The tables are DOCUMENT data, so writing them is a change to the
+        # document: without this the title bar showed no asterisk and
+        # closing the app dropped the office's new pen table without a
+        # prompt.
+        self._scene.version += 1
         self._window.viewport.update()
         try:
             self._window.viewport.notify_scene_changed()
@@ -152,7 +157,12 @@ class PensDialog(QDialog):
         self._scene.pens = {k: tuple(v) for k, v in _pens.PENS.items()}
         self._scene.layer_renames = {}
         self._load()
+        self._scene.version += 1
         self._window.viewport.update()
+        try:
+            self._window.viewport.notify_scene_changed()
+        except Exception:                          # noqa: BLE001 — best effort
+            pass
 
     def closeEvent(self, event) -> None:            # noqa: N802 — Qt name
         # Leaving without "Áp dụng" changes nothing: the two tables are

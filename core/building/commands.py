@@ -185,6 +185,74 @@ def set_project(values: dict, rebuild=None) -> BuildingEdit:
     return BuildingEdit(mutate, rebuild)
 
 
+def changed_ids_between(before_payload, after_payload):
+    """The ids a STEP touched: the diff between its own two payloads.
+
+    This is the question a targeted rebuild actually asks — «which
+    elements did this step move» — and it is NOT the same as «which
+    elements differ from the model right now», because at the moment an
+    undo runs the model already equals the before-payload and that second
+    question answers «nothing» while the scene still holds the geometry
+    the step created.
+
+    A payload has no Building object to walk, so the payload form of the
+    model is used for both sides; the widening rules are the same.
+    """
+    import json
+
+    if not isinstance(before_payload, dict) \
+            or not isinstance(after_payload, dict):
+        return None
+    was = {str(e.get("id")): e
+           for e in (before_payload.get("elements") or ())}
+    now = {str(e.get("id")): e
+           for e in (after_payload.get("elements") or ())}
+    ids: set = set()
+
+    def row_key(row):
+        return (str(row.get("type")), str(row.get("story_id")),
+                json.dumps(row.get("params") or {}, sort_keys=True,
+                           ensure_ascii=False))
+
+    stories_moved = _payload_story_rows_differ(before_payload, after_payload)
+    for eid, row in now.items():
+        old = was.get(eid)
+        if old is None or row_key(old) != row_key(row):
+            ids.add(eid)
+            if str(row.get("type")) == "wall":
+                ids.update(str(other.get("id"))
+                           for other in now.values()
+                           if str(other.get("story_id"))
+                           == str(row.get("story_id")))
+    ids.update(str(eid) for eid in was if eid not in now)   # removed
+    if stories_moved:
+        ids.update(now)
+    # An opening's geometry is its HOST wall's business: a door that was
+    # ADDED and is now removed (an undo) exists only in the before-payload
+    # — the after side has no row to read the host from — so BOTH sides
+    # are consulted, and the host is rebuilt either way.
+    for row in (*now.values(), *was.values()):
+        host = str((row.get("params") or {}).get("host_wall_id") or "")
+        if row.get("id") and str(row.get("id")) in ids and host:
+            ids.add(host)
+    return ids
+
+
+def _payload_story_rows_differ(before_payload, after_payload) -> bool:
+    """Whether a storey row moved between two payloads."""
+    import json
+
+    was = {str(s.get("id")): s
+           for s in (before_payload.get("stories") or ())}
+    now = {str(s.get("id")): s
+           for s in (after_payload.get("stories") or ())}
+    if set(was) != set(now):
+        return True
+    return any(json.dumps(was[k], sort_keys=True, default=str)
+               != json.dumps(now[k], sort_keys=True, default=str)
+               for k in was)
+
+
 def changed_element_ids(before_payload, building):
     """The ids whose rows differ between a stored payload and the model.
 

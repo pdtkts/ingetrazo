@@ -930,9 +930,18 @@ _dim_position_remap: list = []
 
 
 def _load_bim_annotations(scene, payload: dict) -> None:
-    """Rebuild the registry against the entities the loader just made."""
+    """Rebuild the registry against the entities the loader just made.
+
+    A document with no registry block gets an EMPTY one, never the one the
+    previous document left: the registry is positions into this scene's
+    lists, and a stale key from another file either points at nothing (so
+    its drawing silently loses its annotations) or — worse — points at
+    whatever now sits at that index, which is how a hand-written drawing
+    could inherit another document's marks.
+    """
     rows_by_key = payload.get("bim_annotations")
     if not isinstance(rows_by_key, dict):
+        scene.bim_annotations = {}
         return
     dims = list(getattr(scene, "dimensions") or ())
     labels = list(getattr(scene, "text_labels") or ())
@@ -1563,6 +1572,7 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     from core.textlabel import TextLabel
     for raw in payload.get("text_labels", []):
         scene.text_labels.append(TextLabel.from_dict(raw))
+    scene.bim_annotations = {}      # the previous document's, if any
     _load_bim_annotations(scene, payload)
     overrides = payload.get("detail_overrides")
     scene.detail_overrides = overrides if isinstance(overrides, dict) else {}

@@ -119,11 +119,34 @@ class BuildingTool(Tool):
 
         def rebuild(scene, building) -> None:
             before = getattr(command, "_before_payload", None)
-            ids = bim_commands.changed_element_ids(before, building)
-            if ids is None:
+            after = getattr(command, "_after_payload", None)
+            # The diff is only meaningful on a REDO, where both payloads
+            # exist. On the first run — and on every UNDO, which restores
+            # the before-payload and then calls this same hook — the two
+            # payloads are not a before/after pair at all, the diff comes
+            # out EMPTY, and a targeted rebuild of nothing is a no-op: the
+            # mesh snapshot hid it for loose geometry, but the GROUP
+            # geometry the edit produced (an opening's cut out of its
+            # wall) stayed at the post-edit revision. The picture, the
+            # takeoff and the DXF then disagreed with the model until the
+            # file was reopened.
+            # The word "changed" belongs to the STEP, not to the moment
+            # the hook runs. On undo the model is already back to its
+            # before-payload, so diffing «before vs now» finds NOTHING and
+            # a targeted rebuild does nothing — leaving the geometry the
+            # step had created (the opening's cut, the neighbour's mitre)
+            # standing after the user pressed Ctrl+Z. The elements this
+            # step touched are therefore the diff between ITS OWN two
+            # payloads, and a rebuild that then runs those ids, whatever
+            # state the model is in, repairs both directions.
+            if before is None or after is None:
                 sync(scene, building)
-            else:
-                sync(scene, building, element_ids=ids)
+                return
+            ids = bim_commands.changed_ids_between(before, after)
+            if ids is None or not ids:
+                sync(scene, building)
+                return
+            sync(scene, building, element_ids=ids)
         return rebuild
 
     def _ground_z(self, viewport) -> float:

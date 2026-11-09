@@ -208,13 +208,21 @@ class DetailManagerDialog(QDialog):
             "note": self.note_edit.text().strip(),
         }
         self.status.setText(tr("Đã lưu — chi tiết dùng bản này từ giờ."))
+        # The override is DOCUMENT data: bumping the version is what makes
+        # the title bar's asterisk appear and the close prompt ask.
+        self._scene.version += 1
         self._window.viewport.update()
+        try:
+            self._window.viewport.notify_scene_changed()
+        except Exception:                          # noqa: BLE001 — best effort
+            pass
 
     def _reset_one(self) -> None:
         key = self.pick.currentData()
         if key:
             overrides(self._scene).pop(str(key), None)
             self._load()
+            self._scene.version += 1
             self.status.setText(tr("Đã trả về bản chuẩn của thư viện."))
 
     def _cell_text(self, row: int, col: int, kind) -> str:
