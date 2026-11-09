@@ -96,6 +96,19 @@ def test_the_menu_asks_for_the_job_before_it_issues_the_set(window):
         "Lập hồ sơ tự động…"), labels
 
 
+def test_every_toolbar_tool_has_an_icon_drawn_for_it(window):
+    """A toolbar button with no icon is a blank square a user has to learn
+    by position. The BIM bar carried twelve of them — the whole parametric
+    toolset — while every other bar had its own drawings."""
+    from views.icons import tool_icon
+
+    for key in ("wall", "curtain_wall", "column", "beam", "slab",
+                "ceiling", "roof", "stair", "door", "window", "zone",
+                "fixture", "pick", "inject"):
+        assert key in window._tools, key
+        assert not tool_icon(key).isNull(), f"«{key}» không có icon"
+
+
 def test_the_menu_offers_the_advanced_maintenance(window):
     """The maintenance a long job needs, in one group, each entry real."""
     advanced = window._bim_advanced

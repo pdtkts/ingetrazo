@@ -2159,8 +2159,158 @@ def _first_person(p, ink):
         p.drawPath(cap)
 
 
+# ---- the BIM tools ------------------------------------------------------------
+# Every one is a SECTION the trade would draw: a wall in plan with its two
+# faces, a door's swing arc, a window's glazing lines. An icon that is a
+# picture of the thing beats a letter, and the toolbar is what a user looks
+# at while they learn which button makes a wall.
+def _wall_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(7, 16, 34, 16))                     # the two faces
+    pen = QPen(_accent(), 2.0, Qt.DashLine)
+    p.save()
+    p.setPen(pen)
+    p.drawLine(QPointF(7, 24), QPointF(41, 24))            # the baseline
+    p.restore()
+
+
+def _curtain_wall_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(8, 12, 32, 24))
+    p.drawLine(QPointF(19, 12), QPointF(19, 36))
+    p.drawLine(QPointF(29, 12), QPointF(29, 36))
+    p.drawLine(QPointF(8, 24), QPointF(40, 24))
+
+
+def _column_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(16, 16, 16, 16))
+    pen = QPen(_accent(), 2.0, Qt.DashLine)
+    p.save()
+    p.setPen(pen)
+    p.drawLine(QPointF(10, 24), QPointF(14, 24))
+    p.drawLine(QPointF(34, 24), QPointF(38, 24))
+    p.restore()
+
+
+def _beam_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(6, 18, 36, 12))
+    pen = QPen(_accent(), 2.0)
+    p.save()
+    p.setPen(pen)
+    p.drawLine(QPointF(12, 18), QPointF(12, 30))
+    p.drawLine(QPointF(36, 18), QPointF(36, 30))
+    p.restore()
+
+
+def _slab_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawPolygon(QPolygonF([QPointF(8, 28), QPointF(18, 20),
+                             QPointF(40, 20), QPointF(30, 28)]))
+    p.drawLine(QPointF(8, 28), QPointF(8, 33))
+    p.drawLine(QPointF(30, 28), QPointF(30, 33))
+    p.drawLine(QPointF(8, 33), QPointF(30, 33))
+    p.drawLine(QPointF(30, 33), QPointF(40, 25))
+    p.drawLine(QPointF(8, 33), QPointF(18, 25))
+    p.drawLine(QPointF(18, 25), QPointF(40, 25))
+
+
+def _ceiling_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawLine(QPointF(8, 20), QPointF(40, 20))
+    pen = QPen(_accent(), 2.0, Qt.DashLine)
+    p.save()
+    p.setPen(pen)
+    p.drawLine(QPointF(8, 26), QPointF(40, 26))
+    p.restore()
+    for x in (8.0, 24.0, 40.0):
+        p.drawLine(QPointF(x, 26), QPointF(x, 34))
+
+
+def _roof_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawLine(QPointF(6, 28), QPointF(24, 14))
+    p.drawLine(QPointF(24, 14), QPointF(42, 28))
+    p.drawLine(QPointF(6, 28), QPointF(42, 28))
+
+
+def _stair_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    y = 36.0
+    for i, x in enumerate((10.0, 18.0, 26.0, 34.0)):
+        p.drawLine(QPointF(x, y), QPointF(x, y - 6.0))
+        p.drawLine(QPointF(x, y - 6.0), QPointF(x + 8.0, y - 6.0))
+        y -= 6.0
+
+
+def _door_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(8, 12, 6, 26))
+    p.drawRect(QRectF(36, 12, 6, 26))
+    pen = QPen(_accent(), 2.0)
+    p.save()
+    p.setPen(pen)
+    p.drawLine(QPointF(8, 12), QPointF(30, 12))
+    p.drawLine(QPointF(8, 12), QPointF(8, 34))
+    p.restore()
+
+
+def _window_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(12, 10, 24, 30))
+    p.drawLine(QPointF(12, 25), QPointF(36, 25))
+    p.drawLine(QPointF(24, 10), QPointF(24, 40))
+
+
+def _zone_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(10, 14, 28, 22))
+    pen = QPen(_accent(), 2.0, Qt.DotLine)
+    p.save()
+    p.setPen(pen)
+    p.drawLine(QPointF(14, 30), QPointF(34, 20))
+    p.drawLine(QPointF(14, 20), QPointF(34, 30))
+    p.restore()
+
+
+def _inject_icon(p, ink):
+    """Ống nhả: the bucket the eyedropper fills — the other half of the
+    take-and-give pair, so the two buttons read as one gesture."""
+    p.setBrush(Qt.NoBrush)
+    body = QPolygonF([QPointF(12, 16), QPointF(36, 16),
+                      QPointF(30, 38), QPointF(18, 38)])
+    p.drawPolygon(body)
+    p.drawLine(QPointF(20, 10), QPointF(28, 10))
+    p.drawLine(QPointF(24, 10), QPointF(24, 16))
+    pen = QPen(_accent(), 2.0)
+    p.save()
+    p.setPen(pen)
+    p.drawLine(QPointF(16, 26), QPointF(32, 26))       # the paint level
+    p.restore()
+
+
+def _fixture_icon(p, ink):
+    p.setBrush(Qt.NoBrush)
+    p.drawLine(QPointF(20, 12), QPointF(20, 24))
+    p.drawEllipse(QPointF(24, 30), 8.0, 7.0)
+    p.drawLine(QPointF(20, 24), QPointF(24, 24))
+
+
+_BIM_ICONS = {
+    "wall": _wall_icon, "curtain_wall": _curtain_wall_icon,
+    "column": _column_icon, "beam": _beam_icon, "slab": _slab_icon,
+    "ceiling": _ceiling_icon, "roof": _roof_icon, "stair": _stair_icon,
+    "door": _door_icon, "window": _window_icon, "zone": _zone_icon,
+    "fixture": _fixture_icon,
+    # Ống hút is the eyedropper the Paint tool already draws — one gesture,
+    # one picture; Ống nhả is the bucket that receives what it took.
+    "pick": _eyedropper, "inject": _inject_icon,
+}
+
 _DRAW = {
     **_SOLID_ICONS,
+    **_BIM_ICONS,
     "select": _select, "line": _line, "freehand": _freehand,
     "side_collapse": _side_collapse, "plus": _plus,
     "overflow_h": _overflow_h, "overflow_v": _overflow_v,
