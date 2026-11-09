@@ -1006,8 +1006,19 @@ def install_view_planes(scene, view: DrawingView, *, tag: str = "") -> list:
     added: list = []
     tag = str(tag or "")
     published = getattr(scene, "_bim_published_planes", None)
-    if published is None:
+    if not isinstance(published, dict):
         published = scene._bim_published_planes = {}
+    if tag and tag not in published:
+        # A file saved before the registry was written (or written by a
+        # teammate's build) reopens with planes that carry the tag in
+        # their NAME and no registry entry: index them once, so the next
+        # issue still REPLACES its own planes instead of stacking a
+        # second set on the first.
+        tag_marker = f" [{tag}]"
+        found = [sp for sp in scene.section_planes
+                 if tag_marker in str(getattr(sp, "name", "") or "")]
+        if found:
+            published[tag] = found
     if tag and tag in published:
         for old in published.pop(tag):
             if old in scene.section_planes:
@@ -1015,6 +1026,11 @@ def install_view_planes(scene, view: DrawingView, *, tag: str = "") -> list:
     for sp in view.section_planes:
         if not sp.name:
             sp.name = view.name or view.kind
+        # The tag rides in the NAME as well as the registry: the registry
+        # is per session, and a plane that came back from a saved file has
+        # nothing else to say which drawing published it.
+        if tag:
+            sp.name = f"{sp.name} [{tag}]"
         scene.section_planes.append(sp)
         added.append(sp)
     if tag:

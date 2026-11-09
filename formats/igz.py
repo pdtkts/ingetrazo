@@ -822,6 +822,13 @@ def save_scene(scene, path: Path) -> dict:
     labels = getattr(scene, "text_labels", None)
     if labels:
         payload["text_labels"] = [t.to_dict() for t in labels]
+    # The BIM annotation registry: which drawing owns which dimension and
+    # which room stamp. It is written as POSITIONS in the two lists above,
+    # so it survives the round-trip (the loaded entities are new objects,
+    # and a registry of stale references would rebuild nothing). Without
+    # it a re-issue after reopening the file stacks a second dimension
+    # chain and a second set of stamps on the first.
+    _save_bim_annotations(scene, payload)
     guides = getattr(scene, "guides", None)
     if guides:
         # A guide at NaN is left out instead of refusing the save (#723):
@@ -868,6 +875,64 @@ def save_scene(scene, path: Path) -> dict:
     else:
         _write_atomic(path, doc.encode("utf-8"))
     return {"embedded": len(blobs), "missing": missing}
+
+
+def _save_bim_annotations(scene, payload: dict) -> None:
+    """Write the BIM annotation registry as INDEXES into the two lists.
+
+    ``scene.bim_annotations`` maps a drawing's key to its own dimensions
+    and labels; the entities themselves are saved by the two lists beside
+    this. Positions are what survives: the loader builds new objects, so a
+    registry of old references would point at nothing.
+    """
+    registry = getattr(scene, "bim_annotations", None)
+    if not isinstance(registry, dict) or not registry:
+        return
+    dims = {id(e): i for i, e in enumerate(getattr(scene, "dimensions") or ())}
+    labels = {id(e): i
+              for i, e in enumerate(getattr(scene, "text_labels") or ())}
+    edges = {id(e): i
+             for i, e in enumerate(getattr(getattr(scene, "mesh", None),
+                                           "edges", None) or ())}
+    out: dict = {}
+    for key, entities in registry.items():
+        rows = []
+        for entity in entities or ():
+            if id(entity) in dims:
+                rows.append(["dim", dims[id(entity)]])
+            elif id(entity) in labels:
+                rows.append(["label", labels[id(entity)]])
+            elif id(entity) in edges:
+                rows.append(["edge", edges[id(entity)]])
+        if rows:
+            out[str(key)] = rows
+    if out:
+        payload["bim_annotations"] = out
+
+
+def _load_bim_annotations(scene, payload: dict) -> None:
+    """Rebuild the registry against the entities the loader just made."""
+    rows_by_key = payload.get("bim_annotations")
+    if not isinstance(rows_by_key, dict):
+        return
+    dims = list(getattr(scene, "dimensions") or ())
+    labels = list(getattr(scene, "text_labels") or ())
+    edges = list(getattr(getattr(scene, "mesh", None), "edges", None) or ())
+    registry: dict = {}
+    for key, rows in rows_by_key.items():
+        found = []
+        for row in rows or ():
+            try:
+                kind, index = str(row[0]), int(row[1])
+            except (TypeError, IndexError, ValueError):
+                continue
+            pool = (dims if kind == "dim" else labels if kind == "label"
+                    else edges if kind == "edge" else [])
+            if 0 <= index < len(pool):
+                found.append(pool[index])
+        if found:
+            registry[str(key)] = found
+    scene.bim_annotations = registry
 
 
 def _live_element_count(scene) -> int:
@@ -1451,6 +1516,7 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     from core.textlabel import TextLabel
     for raw in payload.get("text_labels", []):
         scene.text_labels.append(TextLabel.from_dict(raw))
+    _load_bim_annotations(scene, payload)
 
     from core.guide import Guide
     scene.guides.clear()

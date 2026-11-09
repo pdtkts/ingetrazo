@@ -391,3 +391,44 @@ def test_a_same_named_scene_the_user_saved_is_not_hijacked():
                 if v.name == "Mặt bằng Tầng 1"]) == 2, \
         "bản vẽ phải có cảnh riêng của nó"
     del _sheets
+
+
+def test_reopening_the_file_does_not_stack_the_plan_annotations(tmp_path):
+    """A re-issue REPLACES a drawing's dimensions and stamps, and it can
+    only do that if it recognises them — after a save and a load too. The
+    registry used to be in memory alone, so a reissued plan carried two
+    dimension chains and two sets of room stamps."""
+    from formats.igz import load_into, save_scene
+    from core.building import drawings as _drawings
+
+    b = _house(1)
+    scene = Scene()
+    DS.generate_docset(scene, b)
+    before = (len(scene.dimensions), len(scene.text_labels))
+    doc = tmp_path / "nha.igz"
+    save_scene(scene, doc)
+    back = Scene()
+    load_into(back, doc)
+    DS.generate_docset(back, b)
+    after = (len(back.dimensions), len(back.text_labels))
+    assert after == before, f"chú thích bị chồng sau khi mở lại: {before} → {after}"
+    del _drawings
+
+
+def test_reopening_the_file_does_not_stack_the_cut_planes(tmp_path):
+    """A re-issue REPLACES its own cut planes; the registry that says
+    which are its own is per session, so a reopened file indexes them by
+    the tag their names carry."""
+    from formats.igz import load_into, save_scene
+
+    b = _house(1)
+    scene = Scene()
+    DS.generate_docset(scene, b)
+    before = len(scene.section_planes)
+    doc = tmp_path / "plans.igz"
+    save_scene(scene, doc)
+    back = Scene()
+    load_into(back, doc)
+    DS.generate_docset(back, b)
+    assert len(back.section_planes) <= before + 2, \
+        f"mặt phẳng cắt bị chồng: {before} → {len(back.section_planes)}"
