@@ -26,10 +26,11 @@ menu) lists storeys and elements with their parameters.
 | Slab / Ceiling | An outline with a thickness — a floor, a soffit. |
 | Roof | An outline, a slope, an overhang. Single-slope over a convex outline. |
 | Stair | A centre line; the treads follow it and rise to the storey above. |
-| Door / Window | An opening **cut into its host wall**, with the leaf or glazing drawn in. |
+| Door / Window | An opening **cut into its host wall**, with the leaf or glazing drawn in. Move the wall and the opening follows: its geometry is the host's, and the rebuild knows it. |
 | Curtain wall | A glazed grid over an opening. |
 | Room (zone) | A boundary that carries a name and an area. |
 | Fixture | A sanitary fixture at a point, turned by its angle. |
+| Eyedropper / Apply properties | Take a building element's **specification** (thickness, material, name, height) and give it to others — a click each. The PLACEMENT never travels: a wall keeps its own two ends and a door keeps its own host, because copying those would move the element, which is what Move is for. Applying to a whole selection is one undo step. |
 
 Elements are **data**: changing a parameter rebuilds the geometry, and the
 whole operation is one undo step (including the geometry).
@@ -60,6 +61,14 @@ would print two dimension chains disagreeing about one wall.
 with no walls, a plan with no rooms), because an empty sheet looks exactly
 like a finished one until it is printed.
 
+**BIM ▸ Thông tin dự án…** is the job's own data — what the title block
+prints on every sheet: the works, the item, the investor, the address, who
+drew it and who is answerable, the date and the issue. It is document
+data (`building.project`), written as one undo step, so re-issuing the set
+carries the corrected name on all forty sheets instead of it being
+retyped per sheet and drifting. A field left blank falls back to the
+office's own defaults (**BIM ▸ Văn phòng…**).
+
 ## 3. The language of a plan
 
 Auto-annotation writes what a drafter would:
@@ -84,7 +93,20 @@ deduction down to what the wall actually is.
 
 **BIM ▸ Xuất DXF bản vẽ…** writes the plan as a DXF another CAD opens —
 lines by class on their own layers with their pens, the section's HATCH
-fill, real DIMENSION and TEXT entities, millimetres declared.
+fill, real DIMENSION and TEXT entities, millimetres declared. The file
+carries **this** storey's annotations and nobody else's, and it reuses the
+key the drawing set already published that storey under, so exporting
+twice leaves the sheet as it was rather than doubling its dimension
+chains.
+
+**BIM ▸ Nâng cao** holds the maintenance a long job needs:
+
+| Entry | What it does |
+|---|---|
+| Dựng lại mô hình (nối tường) | Rebuilds every element's geometry from its parameters, changing no parameter — the answer to a corner that did not join, and to a picture that disagrees with the numbers. |
+| Kiểm tra DXF đã xuất… | Reads a file that has already **left** the application back and holds it against the model: a layer rename that reached the dialog and not the exporter, a cut whose hatch became ink, a pen ladder flattened to one width. It reports; it never repairs. |
+| Đo lag… | The live model's own numbers — elements, storeys, faces, the cost of a full rebuild and of a repaint. The question mid-job is «is MY file the problem». |
+| Tạm dừng BIM | Holds BIM geometry regeneration while freeform work goes on. Every path that rebuilds asks this one switch, so the parameters keep being written and the geometry catches up when it is released; the switch is session state and never travels in the file. |
 
 **File ▸ IFC (BIM)…** writes IFC4: storeys as `IfcBuildingStorey`, walls,
 doors and windows with `IfcOpeningElement` + `IfcRelVoidsElement` +
@@ -122,3 +144,4 @@ the face-tagging layer, for BIM on freeform geometry).
 | The three-storey acceptance run | `python scripts/e2e_bim_demo.py` |
 | What a 3000-element model costs | `python scripts/bench_bim.py` |
 | The building tests | `python -m pytest tests/test_building_*.py tests/test_bim_menu.py tests/test_ai_bim.py -q` |
+| The AI bridge parity | `python -m pytest tests/test_ai_bim.py tests/test_pick_inject.py -q` |
