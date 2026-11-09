@@ -41,6 +41,11 @@ from core.i18n import tr
 #: opens at before ``fit`` frames the storey.
 BASE_MM_PER_PX = 4.0
 
+#: The pen a drawn entity uses: index 1, the «profile» weight. The office's
+#: own ink sits beside the model's linework without being mistaken for a
+#: cut line — the same pen the note leaders already use.
+_DRAWN_KIND = 1
+
 #: The scales the office uses, as the drawing's own denominators.
 STANDARD_SCALES = (1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000)
 
@@ -221,6 +226,13 @@ class _Canvas(QWidget):
         event.accept()
 
     def mousePressEvent(self, event) -> None:       # noqa: N802 — Qt
+        if event.button() == Qt.RightButton and self._plan._draft is not None:
+            # A right-click ENDS a run rather than cancelling it: the
+            # office finishes a polyline with the second button, and the
+            # vertices already placed are a drawing, not a mistake.
+            self._plan.finish_draft()
+            event.accept()
+            return
         if event.button() in (Qt.MiddleButton, Qt.RightButton):
             self._drag_from = event.position()
             event.accept()
@@ -327,6 +339,11 @@ class _Canvas(QWidget):
             if self._selected is not None:
                 self._plan.remove_element(self._selected)
                 self._selected = None
+                event.accept()
+                return
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if getattr(self._plan, "_draft", None) is not None:
+                self._plan.finish_draft()
                 event.accept()
                 return
         if event.key() == Qt.Key_Escape:
@@ -645,11 +662,21 @@ class PlanWindow(QDialog):
         if callable(activate):
             activate(tool_key)
 
-    @staticmethod
-    def _cmd_for_tool(tool_key: str) -> str:
+    #: The bar's internal key → the drawing command it runs. The two
+    #: differ where the bar inherited a key from the 3D toolbar: «arc» was
+    #: the 3D tool's id, and on a PLAN it is the drawing's own 2-point
+    #: arc. A key with no entry runs by its own name.
+    _BAR_TO_DRAFT = {"arc": "arc2", "freehand": "line",
+                     "circle": "circle", "polyline": "polyline",
+                     "line": "line", "arc3": "arc3"}
+
+    @classmethod
+    def _cmd_for_tool(cls, tool_key: str) -> str:
         from views import draft_tools
 
-        return str(tool_key) if tool_key in draft_tools.DRAFT_TOOLS else ""
+        key = str(tool_key)
+        wanted = cls._BAR_TO_DRAFT.get(key, key)
+        return wanted if wanted in draft_tools.DRAFT_TOOLS else ""
 
     def magnifier_available(self) -> bool:
         """The lens is this window's own tool, so it is always runnable."""
@@ -802,6 +829,19 @@ class PlanWindow(QDialog):
             self._say(tr("Dưới con trỏ: %s") % name)
 
     # ---- what the canvas asks of the model ------------------------------
+    def _cut_z_mm(self) -> float:
+        """This drawing's cut, in model millimetres — the height the plan
+        stands at, which is what decides whose ink shows on it."""
+        from core.building import drawings as _drawings
+
+        story = self._building.story(self._story_id) if self._building \
+            else None
+        cut = float(_drawings.DEFAULT_CUT_MM)
+        row = getattr(self, "_view_row", None) or {}
+        if row.get("cut_mm") is not None:
+            cut = float(row["cut_mm"])
+        return float((story or {}).get("z_mm", 0.0)) + cut
+
     def build_drawing(self):
         """``(segs, loops, marks, bbox)`` for the active storey, in metres.
 
@@ -852,6 +892,16 @@ class PlanWindow(QDialog):
                  int(k)] for s, k in zip(drawing.segs, drawing.kinds)]
         loops = [[(float(p[0]) * 1000.0 + dx, float(p[1]) * 1000.0 + dy)
                   for p in ring] for ring in (drawing.loops or ())]
+        # What the OFFICE drew with the plan's own line tools: a drawing
+        # carries the entities standing at ITS cut, and nothing else. They
+        # are segments by the time they reach here (an arc is faceted), so
+        # the paint path needs to know nothing about circles.
+        from core.plan_draw import curves_at
+
+        for curve in curves_at(self._scene, self._cut_z_mm() / 1000.0):
+            for x1, y1, x2, y2 in curve.segments():
+                segs.append([float(x1), float(y1), float(x2), float(y2),
+                             _DRAWN_KIND])
         marks = self._marks()
         box = _drawings.story_box(self._building,
                                   self._building.story(self._story_id)
@@ -997,6 +1047,24 @@ class PlanWindow(QDialog):
             canvas.update()
         return True
 
+    def finish_draft(self) -> bool:
+        """End a multi-click run (Enter, a right-click) COMMITTING it.
+
+        Esc cancels; this finishes. A polyline half drawn and then
+        cancelled is work thrown away, and the office's own habit after the
+        last vertex is Enter or a right-click — the two must not mean the
+        same thing.
+        """
+        tool = self._draft
+        if tool is None:
+            return False
+        finish = getattr(tool, "finish", None)
+        if callable(finish):
+            finish()
+        self.cancel_draft()
+        self.refresh()
+        return True
+
     def cancel_draft(self) -> None:
         self._draft = None
         canvas = getattr(self, "canvas", None)
@@ -1081,7 +1149,12 @@ class PlanWindow(QDialog):
             self._say(plan_snap.label_for(snapped))
         done = self._draft.click(snapped.x_mm, snapped.y_mm)
         if done:
+            # A tool that says it is finished hands the plan back. A CHAIN
+            # (the line tool) returns False and stays armed, because the
+            # next click continues the run the user is drawing.
             self.cancel_draft()
+            self.refresh()
+        else:
             self.refresh()
         return True
 

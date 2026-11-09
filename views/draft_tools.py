@@ -345,6 +345,157 @@ class CropTool(DraftTool):
         self.points = []
 
 
+class _CurveTool(DraftTool):
+    """What the five drawing tools share: the plan's cut, and one command
+    per committed shape written through the SAME History as the 3D.
+
+    A degenerate shape writes NOTHING and says why. That is not politeness:
+    a zero-length line or a circle of radius zero is an entity no viewer
+    can render and no draughtsman meant to draw, and it would sit in the
+    file forever as an invisible object nobody can select.
+    """
+
+    kind = ""
+
+    def _z(self) -> float:
+        return _z_cut(self.plan)
+
+    def _refuse(self, why: str) -> None:
+        self.points = []
+        say = getattr(self.plan, "_say", None)
+        if callable(say):
+            say(why)
+
+    def commit(self) -> None:
+        """The plain case: the gathered points ARE the shape."""
+        if self._write_curve(list(self.points)):
+            self.points = []
+
+    def _write_curve(self, points) -> bool:
+        """Write one curve and answer whether it landed.
+
+        ``False`` means the shape was degenerate and NOTHING was written:
+        the caller decides whether to keep gathering (a chain drops a
+        zero-length step and carries on) or to give up.
+        """
+        from core.history import AddPlanCurveCommand
+        from core.plan_draw import PlanCurve
+
+        curve = PlanCurve(self.kind, points, z=self._z(),
+                          story_id=str(getattr(self.plan, "_story_id", "") or ""),
+                          layer=ANNOT_LAYER)
+        if curve.is_degenerate():
+            self._refuse(self.REFUSE)
+            return False
+        self.plan._write(AddPlanCurveCommand(curve))
+        return True
+
+    #: What the status line says when the shape came out degenerate.
+    REFUSE = "Hình vẽ không hợp lệ — chưa ghi gì."
+
+
+class LineTool(_CurveTool):
+    """Two points, and a click past the second continues the run: corners
+    are drawn in chains, one undo step per committed segment."""
+
+    kind = "line"
+    hint = "Đường thẳng: bấm điểm đầu, rồi điểm cuối (bấm tiếp để nối tiếp, Esc/chuột phải để kết thúc)"
+    points_needed = 2
+    REFUSE = "Đoạn thẳng dài 0 — chưa ghi gì."
+
+    def click(self, x_mm: float, y_mm: float, *, snapping=None) -> bool:
+        if snapping is not None:
+            snapped = snapping(x_mm, y_mm)
+            if snapped is not None:
+                x_mm, y_mm = snapped
+        point = (float(x_mm), float(y_mm))
+        if not self.points:
+            self.points = [point]
+            return False
+        anchor = self.points[-1]
+        # A CHAIN, not a two-point tool: the office draws a corner by
+        # clicking through it. Each segment is its own undo step (the
+        # office undoes a bad corner, not the whole run) and the LAST point
+        # becomes the next segment's start — which is why the anchor
+        # survives the write below.
+        if self._write_curve([anchor, point]):
+            self.points = [point]
+        else:
+            # A zero-length step is a double click, not a gesture: drop it
+            # and keep the run rather than eating the user's next corner.
+            self.points = [anchor]
+        return False
+
+    def finish(self) -> None:
+        self.points = []
+
+
+class PolylineTool(_CurveTool):
+    """Three or more clicks, Enter or a right-click to finish."""
+
+    kind = "polyline"
+    hint = "Đa tuyến: bấm các đỉnh, Enter/chuột phải để kết thúc"
+    points_needed = 3
+    REFUSE = "Đa tuyến chưa đủ hai điểm khác nhau — chưa ghi gì."
+
+    def click(self, x_mm: float, y_mm: float, *, snapping=None) -> bool:
+        if snapping is not None:
+            snapped = snapping(x_mm, y_mm)
+            if snapped is not None:
+                x_mm, y_mm = snapped
+        point = (float(x_mm), float(y_mm))
+        # A repeated click on the same spot is the user closing the run.
+        if self.points and abs(point[0] - self.points[-1][0]) < 1e-6 \
+                and abs(point[1] - self.points[-1][1]) < 1e-6:
+            self.finish()
+            return True
+        self.points.append(point)
+        return False
+
+    def finish(self) -> None:
+        if len(self.points) >= 2:
+            self._write_curve(list(self.points))
+        self.points = []
+
+
+class Arc2Tool(_CurveTool):
+    """Two points: the half circle standing on their diameter."""
+
+    kind = "arc2"
+    hint = "Cung 2 điểm: bấm hai đầu đường kính"
+    points_needed = 2
+    REFUSE = "Đường kính dài 0 — chưa ghi gì."
+
+
+class Arc3Tool(_CurveTool):
+    """Three points: start, a point ON the arc, end."""
+
+    kind = "arc3"
+    hint = "Cung 3 điểm: bấm điểm đầu, một điểm trên cung, rồi điểm cuối"
+    points_needed = 3
+    REFUSE = "Ba điểm thẳng hàng — không có cung nào đi qua cả ba."
+
+    def _write_curve(self, points) -> None:
+        from core.plan_draw import ARC
+
+        # The scene stores a 3-point arc as ``arc`` — the KIND is the
+        # shape, not the gesture that drew it.
+        self.kind = ARC
+        try:
+            super()._write_curve(points)
+        finally:
+            self.kind = "arc3"
+
+
+class CircleTool(_CurveTool):
+    """Centre, then a point on the rim (the radius)."""
+
+    kind = "circle"
+    hint = "Đường tròn: bấm tâm, rồi một điểm trên đường tròn"
+    points_needed = 2
+    REFUSE = "Bán kính bằng 0 — chưa ghi gì."
+
+
 #: The plan command ids these tools implement, in the registry's spelling.
 DRAFT_TOOLS = {
     "dim": DimensionTool,
@@ -354,6 +505,11 @@ DRAFT_TOOLS = {
     "label": LabelTool,
     "grid": GridTool,
     "crop": CropTool,
+    "line": LineTool,
+    "polyline": PolylineTool,
+    "arc2": Arc2Tool,
+    "arc3": Arc3Tool,
+    "circle": CircleTool,
 }
 
 

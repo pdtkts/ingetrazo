@@ -45,6 +45,10 @@ class Scene:
     groups: list = field(default_factory=list)
     # Annotation entities (static dimensions) — not geometry, drawn as overlays.
     dimensions: list = field(default_factory=list)
+    #: The plan's own drawn entities (LINE, PLINE, ARC, CIRCLE) — two
+    #: dimensions of information on a named layer, like a dimension: not
+    #: geometry, and where the drawing's data lives.
+    plan_curves: list = field(default_factory=list)
     # Leader-text annotations (the Text tool) — same overlay treatment.
     text_labels: list = field(default_factory=list)
     # Georef traced paths (roads / boundaries / alignments) — first-class georef

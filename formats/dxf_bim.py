@@ -282,6 +282,45 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
                 counts["text"] += 1
 
     # ---- the model's dimensions ---------------------------------------
+    # ---- the plan's own drawn entities ---------------------------------
+    # The lines, arcs and circles the OFFICE drew on the plan are part of
+    # the drawing, so they print with it. They are faceted into segments
+    # here — the receiving CAD reads a polyline segment for what it is,
+    # and an arc nobody can render is worse than a polyline that reads as
+    # one.
+    from core.plan_draw import curves_at
+
+    # The drawing's own cut height, the rule every annotation follows: the
+    # storey's floor plus the view's cut. A drawn line belongs to the plan
+    # it stands on, so the sheet looks for it at exactly this z.
+    building_row = getattr(view, "row", None) or {}
+    cut_z = _drawn_cut_z_mm(scene, view, building_row)
+    drawn = curves_at(scene, cut_z / 1000.0) if cut_z is not None else []
+    if drawn:
+        import numpy as np
+        from core.hlr import _to_cam, camera_basis
+
+        lw, _ = table.get("profile", PEN_TABLE.get("profile", lw))
+        name = mapped_layer("KT-NET", layer_map)
+        _ensure_layer(doc, name, 7, lw)
+        camera = view.camera()
+        eye, right, up, fwd = camera_basis(camera)
+
+        def to_curve_plane(x_mm, y_mm, z_m):
+            point = np.array([[x_mm / 1000.0, y_mm / 1000.0, z_m]],
+                             dtype=float)
+            c = _to_cam(point, eye, right, up, fwd)[0]
+            return (float(c[0]) * MM, float(c[1]) * MM)
+
+        for curve in drawn:
+            if not scene.entity_visible(curve):
+                continue
+            for x1, y1, x2, y2 in curve.segments():
+                msp.add_line(to_curve_plane(x1, y1, curve.z),
+                             to_curve_plane(x2, y2, curve.z),
+                             dxfattribs={"layer": name})
+                counts["lines"] += 1
+
     if with_dimensions:
         import numpy as np
         from core.hlr import _to_cam, camera_basis
@@ -469,6 +508,34 @@ def _drawing_key(scene, view):
                 if parts[-len(words):] == words:
                     return str(candidate)
     return None
+
+
+def _drawn_cut_z_mm(scene, view, row: dict):
+    """The z a drawn entity must stand at to belong to this drawing,
+    in model millimetres — ``None`` when the view is not a storey plan
+    (a section or a 3D view carries no plan ink)."""
+    story_id = str(getattr(view, "story_id", "") or "")
+    if not story_id:
+        return None
+    # A frame renders through a SAVED VIEW, whose ``drawing`` dict is the
+    # rule the drawing was issued with — story id, cut and all. That is
+    # what the sheet's own frames carry, so the rule is read from wherever
+    # the caller found the drawing.
+    rule = dict(getattr(view, "row", None) or {})
+    story_id = str(story_id or rule.get("story_id") or "")
+    from core.building import drawings as _drawings
+    from core.building.model import building_of
+
+    building = building_of(scene)
+    story = building.story(story_id) if building is not None else None
+    if not story:
+        return None
+    cut = row.get("cut_mm")
+    if cut is None:
+        cut = story.get("cut_mm")
+    if cut is None:
+        cut = _drawings.DEFAULT_CUT_MM
+    return float(story.get("z_mm", 0.0)) + float(cut)
 
 
 def _labels_of(scene, view):

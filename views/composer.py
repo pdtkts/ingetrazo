@@ -10129,6 +10129,13 @@ class ComposerWindow(QMainWindow):
         item.update()
         self.on_selection_changed()          # the Label box follows
 
+    @staticmethod
+    def _curve_point(x, y, z):
+        """A QVector3D for a drawn curve's own coordinate."""
+        from PySide6.QtGui import QVector3D
+
+        return QVector3D(float(x), float(y), float(z))
+
     def compute_annotations(self, frame: MarcoVista) -> list:
         """The model's paper overlay for *frame* (frame-local mm), every
         style alike — the GL render comes back without overlays and the
@@ -10169,6 +10176,39 @@ class ComposerWindow(QMainWindow):
                 out.extend(self._section_marks(frame, scene, pt, fwd))
             if not getattr(frame, "annotations", False):
                 return out
+            # The plan's own drawn entities, before the dimensions: the
+            # office's ink is part of the drawing, so a sheet that prints
+            # the dimensions and not the lines they were drawn against is
+            # not the drawing the author looked at.
+            from core.plan_draw import curves_at
+
+            # The frame names a SAVED VIEW, and that view's ``drawing``
+            # dict is the rule it was issued with (the court
+            # ``DrawingView.to_dict()``). A scene the generator did not
+            # make — the user's own camera — carries no rule and no plan
+            # ink: their top view is not a storey's drawing.
+            cut_z = None
+            if str(getattr(frame, "view_key", "")).startswith("scene:"):
+                from core.building.drawings import DrawingView
+                from formats.dxf_bim import _drawn_cut_z_mm
+
+                wanted = str(frame.view_key[6:])
+                saved = next((sv for sv in getattr(scene, "saved_views", [])
+                              if getattr(sv, "name", "") == wanted
+                              and getattr(sv, "drawing", None)), None)
+                if saved is not None:
+                    rule = DrawingView.from_dict(saved.drawing)
+                    cut_z = _drawn_cut_z_mm(scene, rule, rule.row or {})
+            for curve in (curves_at(scene, cut_z / 1000.0)
+                          if cut_z is not None else ()):
+                if not scene.entity_visible(curve):
+                    continue
+                for x1, y1, x2, y2 in curve.segments():
+                    p1 = pt(self._curve_point(x1 / 1000.0, y1 / 1000.0,
+                                              curve.z))
+                    p2 = pt(self._curve_point(x2 / 1000.0, y2 / 1000.0,
+                                              curve.z))
+                    out.append(("line", p1[0], p1[1], p2[0], p2[1]))
             size = float(getattr(frame, "annot_text_mm", 2.8) or 2.8)
             style = getattr(scene, "dimension_style", {}) or {}
             fmt = getattr(vp, "_format_dim_value", None)

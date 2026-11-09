@@ -822,6 +822,9 @@ def save_scene(scene, path: Path) -> dict:
     labels = getattr(scene, "text_labels", None)
     if labels:
         payload["text_labels"] = [t.to_dict() for t in labels]
+    curves = getattr(scene, "plan_curves", None)
+    if curves:
+        payload["plan_curves"] = [c.to_dict() for c in curves]
     # The BIM annotation registry: which drawing owns which dimension and
     # which room stamp. It is written as POSITIONS in the two lists above,
     # so it survives the round-trip (the loaded entities are new objects,
@@ -1287,6 +1290,7 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     scene.geo_points.clear()
     scene.text_labels.clear()
     scene.dimensions.clear()
+    scene.plan_curves.clear()
     scene.georef = None
     scene.photo_mesh = survey
     scene.tile_layer = None
@@ -1572,6 +1576,10 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     from core.textlabel import TextLabel
     for raw in payload.get("text_labels", []):
         scene.text_labels.append(TextLabel.from_dict(raw))
+
+    from core.plan_draw import PlanCurve
+    for raw in payload.get("plan_curves", []):
+        scene.plan_curves.append(PlanCurve.from_dict(raw))
     scene.bim_annotations = {}      # the previous document's, if any
     _load_bim_annotations(scene, payload)
     overrides = payload.get("detail_overrides")

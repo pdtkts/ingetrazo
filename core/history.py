@@ -1476,6 +1476,51 @@ class AddDimensionCommand(Command):
         scene.version += 1
 
 
+class AddPlanCurveCommand(Command):
+    """Add one drawn entity (line, polyline, arc, circle) to
+    ``scene.plan_curves``.
+
+    The plan's own ink is a document entity like a dimension: one undo
+    step per user action, and Ctrl+Z takes the line off the drawing rather
+    than leaving ink the model no longer knows about.
+    """
+
+    def __init__(self, curve) -> None:
+        self.curve = curve
+
+    def do(self, scene) -> None:
+        scene.plan_curves.append(self.curve)
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        if self.curve in scene.plan_curves:
+            scene.plan_curves.remove(self.curve)
+        scene.selection.discard(self.curve)
+        scene.version += 1
+
+
+class DeletePlanCurvesCommand(Command):
+    """Remove a set of drawn entities from ``scene.plan_curves``."""
+
+    def __init__(self, curves) -> None:
+        self._curves = list(curves)
+        self._restore: list[tuple[int, object]] = []
+
+    def do(self, scene) -> None:
+        self._restore = [(scene.plan_curves.index(c), c)
+                         for c in self._curves if c in scene.plan_curves]
+        for c in self._curves:
+            if c in scene.plan_curves:
+                scene.plan_curves.remove(c)
+            scene.selection.discard(c)
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        for i, c in sorted(self._restore):
+            scene.plan_curves.insert(i, c)
+        scene.version += 1
+
+
 class DeleteDimensionsCommand(Command):
     """Remove a set of dimensions from ``scene.dimensions``."""
 
