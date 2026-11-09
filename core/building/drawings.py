@@ -965,26 +965,37 @@ def _place_clip_names(view: DrawingView) -> None:
             sp.name = f"{view.kind}:{i}"
 
 
-def install_view_planes(scene, view: DrawingView) -> list:
+def install_view_planes(scene, view: DrawingView, *, tag: str = "") -> list:
     """Register a drawing's cutting planes in the scene, once each.
 
     A frame renders through a saved scene, and a scene refers to its cut by
     uid — so the plane has to BE in the model's list for the frame to find
     it. That is also what the reference does with its per-storey planes:
     the plan's cut belongs to the storey, not to the moment it was drawn.
-    Planes already present (same uid) are left alone. Returns what was
-    added, so a caller can take them away again.
+
+    A plane this drawing published on a PREVIOUS issue is replaced, not
+    kept: the storey may have risen since, and the old plane would sit
+    beside the new one for ever (re-issuing twice used to leave the scene
+    with two cuts for one drawing, then three). Planes the user made by
+    hand are never touched — only the ones this drawing published itself,
+    recognised by the ``tag`` its name carries.
     """
     added: list = []
-    known = {getattr(sp, "uid", None) for sp in
-             getattr(scene, "section_planes", None) or ()}
+    tag = str(tag or "")
+    published = getattr(scene, "_bim_published_planes", None)
+    if published is None:
+        published = scene._bim_published_planes = {}
+    if tag and tag in published:
+        for old in published.pop(tag):
+            if old in scene.section_planes:
+                scene.section_planes.remove(old)
     for sp in view.section_planes:
-        if getattr(sp, "uid", None) in known:
-            continue
         if not sp.name:
             sp.name = view.name or view.kind
         scene.section_planes.append(sp)
         added.append(sp)
+    if tag:
+        published[tag] = list(added)
     return added
 
 
@@ -1005,9 +1016,9 @@ def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
     from core.saved_views import SavedView
 
     _place_clip_names(view)
-    install_view_planes(scene, view)
     scene_name = name or view.name or VIEW_LABELS.get(
         view.kind, view.kind)
+    install_view_planes(scene, view, tag=f"drawing:{scene_name}")
     existing = next((sv for sv in scene.saved_views
                      if sv.name == scene_name), None)
     viewpoint = view.camera()

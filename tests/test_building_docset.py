@@ -282,3 +282,28 @@ def test_a_sheet_the_user_drew_by_hand_is_never_deleted():
     scene.compositions.append(mine)
     DS.generate_docset(scene, b)
     assert mine in scene.compositions
+
+
+def test_reissuing_does_not_pile_up_cut_planes():
+    """A scene refers to its cut by uid, so the planes a drawing
+    publishes must be REPLACED on re-issue, not added beside the old
+    ones — three issues used to leave three cuts for one plan, and a
+    plane the office made by hand must never be swept up with them."""
+    from PySide6.QtGui import QVector3D
+    from core.section import SectionPlane
+
+    b = _house(2)
+    scene = Scene()
+    hand = SectionPlane(QVector3D(0.0, 0.0, 5.0), QVector3D(0.0, 0.0, 1.0),
+                        name="Mặt cắt của tôi")
+    scene.section_planes.append(hand)
+    DS.generate_docset(scene, b)
+    first = len(scene.section_planes)
+    DS.generate_docset(scene, b)
+    assert len(scene.section_planes) == first, "sinh lại không được thêm mặt phẳng"
+    b.stories.insert(1, {"id": "mid", "name": "Tầng 1.5", "z_mm": 1650.0,
+                         "height_mm": 1650.0})
+    DS.generate_docset(scene, b)
+    assert hand in scene.section_planes, "mặt phẳng tự tay tạo phải còn nguyên"
+    assert len(scene.section_planes) <= first + 4, \
+        "tầng mới chỉ thêm mặt phẳng cho chính nó"
