@@ -829,6 +829,11 @@ def save_scene(scene, path: Path) -> dict:
     # it a re-issue after reopening the file stacks a second dimension
     # chain and a second set of stamps on the first.
     _save_bim_annotations(scene, payload)
+    # An office's own detail edits are document data: a detail reissued
+    # from a saved file must read the same build-up it was drawn from.
+    details = getattr(scene, "detail_overrides", None)
+    if isinstance(details, dict) and details:
+        payload["detail_overrides"] = details
     guides = getattr(scene, "guides", None)
     if guides:
         # A guide at NaN is left out instead of refusing the save (#723):
@@ -1517,6 +1522,8 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     for raw in payload.get("text_labels", []):
         scene.text_labels.append(TextLabel.from_dict(raw))
     _load_bim_annotations(scene, payload)
+    overrides = payload.get("detail_overrides")
+    scene.detail_overrides = overrides if isinstance(overrides, dict) else {}
 
     from core.guide import Guide
     scene.guides.clear()

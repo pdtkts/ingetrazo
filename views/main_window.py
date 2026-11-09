@@ -3058,6 +3058,14 @@ class MainWindow(QMainWindow):
         detail_action.triggered.connect(self._on_insert_library_detail)
         menu.addAction(detail_action)
 
+        manage_action = QAction(tr("Quản lý chi tiết…"), self)
+        manage_action.setStatusTip(tr(
+            "Sửa các chi tiết chuẩn theo cách văn phòng mình thi công: "
+            "thêm bớt lớp, đổi bề dày, chọn mặt cắt — bản sửa đi theo "
+            "tài liệu và mọi lần chèn sau dùng nó."))
+        manage_action.triggered.connect(self._on_manage_details)
+        menu.addAction(manage_action)
+
     # ---- BIM menu actions ---------------------------------------------------
 
     def _bim_building(self):
@@ -3178,7 +3186,7 @@ class MainWindow(QMainWindow):
         form = QFormLayout(dlg)
         pick = QComboBox()
         for key in _detail_lib.keys():
-            pick.addItem(_detail_lib.name(key), key)
+            pick.addItem(_detail_lib.name(key, self.viewport.scene), key)
         form.addRow(tr("Chi tiết:"), pick)
         scale = QSpinBox()
         scale.setRange(5, 100)
@@ -3193,13 +3201,20 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.Accepted:
             return
         made = _detail_lib.insert_detail_on_sheet(
-            sheet, pick.currentData(), scale_denom=float(scale.value()))
+            sheet, pick.currentData(), scale_denom=float(scale.value()),
+            scene=self.viewport.scene)
         self.viewport.update()
         QMessageBox.information(
             self, tr("Chi tiết thư viện"),
             tr("Đã đặt %s lên tờ %s (1:%d).")
             % (made["name"], str(getattr(sheet, "name", "")),
                int(made["scale"])))
+
+    def _on_manage_details(self) -> None:
+        """Quản lý chi tiết: the office's own edits to the standard set."""
+        from views.detail_manager import open_detail_manager
+
+        open_detail_manager(self)
 
     def _on_export_takeoff_csv(self) -> None:
         from core.building import takeoff as _takeoff

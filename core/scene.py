@@ -154,6 +154,10 @@ class Scene:
     #: the previous run's are dropped instead of piling up. User-placed
     #: annotations are never in here and are never touched.
     bim_annotations: dict = field(default_factory=dict)
+    #: The office's own edits to the standard detail library, keyed by the
+    #: library's own key. Saved with the document: a detail reissued from
+    #: a saved file reads the same build-up it was drawn from.
+    detail_overrides: dict = field(default_factory=dict)
     #: View-only trimming planes (ClipOnly section planes) a DRAWING brings
     #: while it renders — a plan's floor limit. Never saved with the model
     #: and never the user's: the composer publishes them around a frame and
@@ -749,6 +753,8 @@ class Scene:
             self.kept_components.clear()
             self.materials.clear()
             self.plugin_data = {}
+            self.bim_annotations = {}
+            self.detail_overrides = {}
             self.selection.clear()
             from core.layers import DEFAULT_LAYER, Layer
             self.layers = [Layer(DEFAULT_LAYER)]

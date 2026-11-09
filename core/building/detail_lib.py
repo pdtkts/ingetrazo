@@ -98,28 +98,54 @@ DETAIL_WIDTH_MM = 900.0
 UNBOUNDED_LAYER_MM = 120.0
 
 
+#: Where an office's own edits live on the scene. Named here (not in the
+#: dialog) because the reader — the library — is what has to find them.
+OVERRIDES_KEY = "detail_overrides"
+
+
+def overrides(scene) -> dict:
+    """The office's own detail edits on ``scene``, made on first use."""
+    if scene is None:
+        return {}
+    store = getattr(scene, OVERRIDES_KEY, None)
+    if not isinstance(store, dict):
+        store = {}
+        setattr(scene, OVERRIDES_KEY, store)
+    return store
+
+
 def keys() -> list:
     """Every detail key, in the order the library declares them."""
     return list(DETAILS)
 
 
-def detail(key: str) -> dict:
-    """The record of ``key``; raises ``KeyError`` for an unknown one."""
-    return DETAILS[str(key)]
+def detail(key: str, scene=None) -> dict:
+    """The record of ``key`` as THIS document reads it.
+
+    ``scene`` brings the office's own edits (``detail_overrides``) over
+    the standard set: an office that builds a floor-up differently draws
+    it once, and every job after that reads the same record.
+    """
+    record = dict(DETAILS[str(key)])
+    edited = overrides(scene).get(str(key))
+    if isinstance(edited, dict):
+        record.update({k: v for k, v in edited.items()
+                       if v not in (None, "")})
+    return record
 
 
-def name(key: str) -> str:
-    return str(detail(key)["name"])
+def name(key: str, scene=None) -> str:
+    return str(detail(key, scene)["name"])
 
 
-def stack_rect(key: str) -> tuple:
+def stack_rect(key: str, scene=None) -> tuple:
     """``(rect, layers)`` of a detail in its own local millimetres.
 
     ``rect`` is ``(0, 0, DETAIL_WIDTH_MM, total_height)`` and ``layers`` is
     ``[(name, pattern, y0, y1), …]`` from the bottom up, so a renderer can
     hatch each band with its own pattern without knowing the table.
     """
-    record = detail(key)
+    record = detail(key, scene)
     out: list = []
     y = 0.0
     for label, _material, thickness, pattern in record["layers"]:
@@ -129,9 +155,9 @@ def stack_rect(key: str) -> tuple:
     return (0.0, 0.0, float(DETAIL_WIDTH_MM), y), out
 
 
-def annotation(key: str) -> list:
+def annotation(key: str, scene=None) -> list:
     """``[(text, y_mm), …]`` — the callout on each layer, bottom up."""
-    record = detail(key)
+    record = detail(key, scene)
     out: list = []
     y = 0.0
     for label, _material, thickness, _pattern in record["layers"]:
@@ -150,7 +176,7 @@ def annotation(key: str) -> list:
 
 def insert_detail_on_sheet(sheet, key: str, *, x_mm: float | None = None,
                            y_mm: float | None = None,
-                           scale_denom: float = 10.0) -> dict:
+                           scale_denom: float = 10.0, scene=None) -> dict:
     """Draw a library detail on a sheet, in the sheet's own millimetres.
 
     Composed of the same items the composer's editor works with — the
@@ -166,7 +192,7 @@ def insert_detail_on_sheet(sheet, key: str, *, x_mm: float | None = None,
     """
     from core.composition import EtiquetaItem, FormaItem, TextoItem
 
-    rect, layers = stack_rect(key)
+    rect, layers = stack_rect(key, scene)
     k = 1.0 / max(float(scale_denom), 1e-6)
     x0 = 40.0 if x_mm is None else float(x_mm)
     y0 = 40.0 if y_mm is None else float(y_mm)
@@ -187,7 +213,7 @@ def insert_detail_on_sheet(sheet, key: str, *, x_mm: float | None = None,
                                  ).startswith(tag)]
     made = {"bands": 0, "labels": 0, "x_mm": x0, "y_mm": y0, "w_mm": w,
             "h_mm": (rect[3] - rect[1]) * k, "scale": float(scale_denom),
-            "name": name(key)}
+            "name": name(key, scene)}
     for label, pattern, ya, yb in layers:
         band = FormaItem(kind="rect", x_mm=x0, y_mm=y0 + ya * k, w_mm=w,
                          h_mm=(yb - ya) * k, fill=bool(pattern))
@@ -202,7 +228,7 @@ def insert_detail_on_sheet(sheet, key: str, *, x_mm: float | None = None,
         sheet.etiquetas.append(callout)
         made["labels"] += 1
     title = TextoItem(x_mm=x0, y_mm=max(y0 - 10.0, 2.0), w_mm=260.0,
-                      text=f"{name(key)}  1:{int(scale_denom)}",
+                      text=f"{name(key, scene)}  1:{int(scale_denom)}",
                       size_pt=10.0, bold=True, list_name=f"__detail__{key}")
     sheet.texts.append(title)
     made["title"] = title.text
