@@ -27,7 +27,8 @@ from __future__ import annotations
 #: What is bound in the execution scope. Same names through both doors.
 SCOPE = (
     "En el scope tienes: scene, mesh, selection, groups, layers, "
-    "viewport, QVector3D, Mesh, Group, Edge, Face, Layer, bim.")
+    "viewport, QVector3D, Mesh, Group, Edge, Face, Layer, bim (el motor "
+    "BIM — ver BIM abajo), tags (etiquetar caras con clase IFC).")
 
 #: The one-line builders. Hand-rolling these is the single biggest waste of
 #: turns we have measured — every model that was not told reinvented a
@@ -105,6 +106,22 @@ UNITS = ("IngeTrazo es un modelador 3D libre de empujar/tirar: Z arriba, "
          "unidades en METROS, ángulos en RADIANES.")
 
 
+#: The BIM vocabulary — the road an agent takes for a BUILDING. Written in
+#: whole operations because an agent that assembles walls by hand gets the
+#: storey bookkeeping, the joins and the quantities wrong, and the whole
+#: engine exists to get them right.
+BIM = """BIM (el motor de edificio — úsalo para cualquier edificio, ENTERO o por partes; unidades MILÍMETROS):
+- TERRENO Y PISO: s1 = bim.add_story("Tầng 1", 0, 3300) — nombre, cota (mm) y altura. Devuelve la fila (s1["id"]).
+- MURO: bim.wall(s1["id"], (0,0), (6000,0), thickness_mm=200, height_mm=3300, material="gach", name="Tường A") — inicio y fin de la línea base en planta. top_link="next" sube el muro hasta el piso de arriba (lo que se quiere casi siempre).
+- CUARTO: bim.room(s1["id"], [(0,0),(6000,0),(6000,4000),(0,4000)], name="Phòng khách") — contorno en planta; da nombre y área.
+- PUERTA / VENTANA: bim.door(wall_id, u_mm=3000, width_mm=900, height_mm=2200) — u_mm es la distancia a lo largo del muro anfitrión, y la puerta CORTa el agujero en ese muro (no la dibujes a mano). bim.window(wall_id, u_mm, width_mm=1200, height_mm=1200, sill_height_mm=900).
+- OTROS: bim.add("slab", s1["id"], outline_mm=[...], thickness_mm=120, building_material_id="btct") — también "column", "beam", "ceiling", "roof", "stair", "fixture", "curtain_wall". bim.edit(id, width_mm=1500) cambia parámetros y reconstruye.
+- LEER: bim.elements(), bim.elements("wall"), bim.takeoff() (metros: áreas y volúmenes por tabla), bim.takeoff_csv(), bim.drawings("story", story_id) (la regla del plano: corte a +1200 y recorte al piso).
+- ENTREGAR: bim.docset() — genera TODO el juego de láminas (plantas, alzados, corte, detalles, carátula) en el documento; bim.export_ifc(ruta) y bim.export_dxf(ruta, story_id).
+- Cada llamada es UN paso de deshacer del usuario y se ve en pantalla: construye, MIRA con screenshot, y sigue. NO uses bim para geometría libre (usa box/revolve/extrude); bim es para el edificio."""
+
+
 def reference(unit: str = "llamada") -> str:
     """Everything, in reading order — what a door hands the model."""
-    return "\n".join((UNITS, SCOPE, RECIPES, HOW_IT_RUNS.format(unit=unit)))
+    return "\n".join((UNITS, SCOPE, BIM, RECIPES,
+                       HOW_IT_RUNS.format(unit=unit)))

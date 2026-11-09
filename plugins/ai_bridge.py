@@ -246,6 +246,72 @@ class _Bridge(QObject):
         from core.ai import run_transactional
         return run_transactional(self._viewport, code, self._scope)
 
+    def _tool_bim(self, action: str = "state", **args) -> dict:
+        """The building, spoken to in whole operations.
+
+        One tool instead of twenty: an agent says what it wants
+        (``action="wall"``, ``action="takeoff"``…) and the bridge runs it in
+        the host's undo stack, so the agent's work appears on screen as it
+        happens and is ONE step to undo.
+        """
+        from core.ai_bim import BimSession
+        session = BimSession(self._viewport)
+        actions = {
+            "state": lambda: {
+                "stories": session.stories(),
+                "elements": len(session.building.elements),
+                "project": dict(session.building.project),
+            },
+            "stories": session.stories,
+            "elements": lambda: session.elements(
+                args.get("kind"), args.get("story_id")),
+            "story": lambda: session.add_story(
+                str(args.get("name") or "Tầng"),
+                float(args.get("z_mm") or 0.0),
+                float(args.get("height_mm") or 3300.0)),
+            "wall": lambda: session.wall(
+                str(args.get("story_id")), args.get("start_mm") or (0.0, 0.0),
+                args.get("end_mm") or (0.0, 0.0),
+                **{k: v for k, v in args.items()
+                   if k in ("thickness_mm", "height_mm", "top_link",
+                            "material", "name")}),
+            "room": lambda: session.room(
+                str(args.get("story_id")), args.get("outline_mm") or [],
+                name=str(args.get("name") or "")),
+            "door": lambda: session.door(
+                str(args.get("wall_id")), float(args.get("u_mm") or 0.0),
+                **{k: v for k, v in args.items()
+                   if k in ("width_mm", "height_mm", "name")}),
+            "window": lambda: session.window(
+                str(args.get("wall_id")), float(args.get("u_mm") or 0.0),
+                **{k: v for k, v in args.items()
+                   if k in ("width_mm", "height_mm", "sill_height_mm",
+                            "name")}),
+            "add": lambda: session.add(str(args.get("kind")),
+                                       str(args.get("story_id")),
+                                       **(args.get("params") or {})),
+            "edit": lambda: session.edit(str(args.get("element_id")),
+                                         **(args.get("params") or {})),
+            "remove": lambda: session.remove(str(args.get("element_id"))),
+            "takeoff": session.takeoff,
+            "takeoff_csv": session.takeoff_csv,
+            "drawings": lambda: session.drawings(
+                str(args.get("kind") or "story"), args.get("story_id")),
+            "docset": lambda: [str(getattr(s, "name", ""))
+                               for s in session.docset()],
+            "export_ifc": lambda: session.export_ifc(
+                str(args.get("path") or "model.ifc")),
+            "export_dxf": lambda: session.export_dxf(
+                str(args.get("path") or "plan.dxf"), args.get("story_id")),
+        }
+        action = str(action or "state")
+        run = actions.get(action)
+        if run is None:
+            raise ValueError(
+                f"unknown BIM action {action!r}; try one of "
+                f"{sorted(actions)}")
+        return {"action": action, "result": run()}
+
     def _tool_query_model(self) -> dict:
         vp = self._viewport
         scene = vp.scene

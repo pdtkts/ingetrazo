@@ -45,6 +45,7 @@ def build_scope(viewport, scope: dict | None = None) -> dict:
     """(Re)bind the live objects an agent scripts against."""
     from PySide6.QtGui import QVector3D
     from core import bim
+    from core.ai_bim import BimSession
     from core.group import Group
     from core.layers import Layer
     from core.mesh import Edge, Face, Mesh, Vertex
@@ -52,7 +53,8 @@ def build_scope(viewport, scope: dict | None = None) -> dict:
     scope.update(
         viewport=viewport, scene=viewport.scene, model=viewport.scene,
         mesh=viewport.scene.mesh, selection=viewport.scene.selection,
-        groups=viewport.scene.groups, layers=viewport.scene.layers, bim=bim,
+        groups=viewport.scene.groups, layers=viewport.scene.layers,
+        bim=BimSession(viewport), tags=bim,
         QVector3D=QVector3D, Mesh=Mesh, Group=Group, Vertex=Vertex,
         Edge=Edge, Face=Face, Layer=Layer)
     scope.update(_recipe_helpers(viewport.scene))

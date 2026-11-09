@@ -78,6 +78,46 @@ TOOLS = [
         },
     },
     {
+        "name": "bim",
+        "description": (
+            "The BIM building engine, in whole operations — the fast road "
+            "for 'make a house': actions state / stories / elements / "
+            "story / wall / room / door / window / add / edit / remove / "
+            "takeoff / takeoff_csv / drawings / docset / export_ifc / "
+            "export_dxf. Units are MILLIMETRES (a wall is start_mm → "
+            "end_mm; a door is u_mm along its host wall). Everything runs "
+            "in the user's undo stack — one step to undo — and appears on "
+            "screen as it happens. Typical flow: state → story → wall → "
+            "door → room → takeoff → docset."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string"},
+                "story_id": {"type": "string"},
+                "element_id": {"type": "string"},
+                "wall_id": {"type": "string"},
+                "kind": {"type": "string"},
+                "name": {"type": "string"},
+                "z_mm": {"type": "number"},
+                "height_mm": {"type": "number"},
+                "thickness_mm": {"type": "number"},
+                "start_mm": {"type": "array", "items": {"type": "number"}},
+                "end_mm": {"type": "array", "items": {"type": "number"}},
+                "outline_mm": {"type": "array",
+                               "items": {"type": "array",
+                                         "items": {"type": "number"}}},
+                "u_mm": {"type": "number"},
+                "width_mm": {"type": "number"},
+                "sill_height_mm": {"type": "number"},
+                "material": {"type": "string"},
+                "top_link": {"type": "string"},
+                "params": {"type": "object"},
+                "path": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "query_model",
         "description": ("Model overview: entity counts, group/component "
                         "names, materials, layers, bounds, selection size."),
