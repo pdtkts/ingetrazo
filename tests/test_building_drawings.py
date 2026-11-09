@@ -352,3 +352,66 @@ def test_a_frame_renders_with_the_drawing_s_floor_trim(house):
     assert drawing.segs.shape[1] == 4
     # A clip plane never contributes a cut chord.
     assert drawing.kinds is None or not (drawing.kinds == 2).any()
+
+
+def test_a_storeys_grid_lands_on_the_plan_with_names_both_ends():
+    """A grid is how the trade TALKS about a plan («trục B»): each axis
+    runs across and carries its own name at both ends."""
+    from core.building.drawings import grid_axes, draw_grid, view_for
+    from core.building.model import Building
+    from core.building.builder import build
+    from core.scene import Scene
+
+    b = Building()
+    story = b.add_story("Tầng 1", 0.0, 3300.0)
+    b.add_element("grid", story["id"], {"axes": [
+        {"name": "1", "dir": "y", "offset_mm": 0.0},
+        {"name": "2", "dir": "y", "offset_mm": 6000.0},
+        {"name": "A", "dir": "x", "offset_mm": 0.0},
+        {"name": "B", "dir": "x", "offset_mm": 4000.0}]})
+    for element in list(b.elements):
+        build(b, element)
+    axes = grid_axes(b, story)
+    assert len(axes) == 4
+    scene = Scene()
+    view = D.view_for(b, {"kind": "story", "story_id": story["id"]})
+    made = draw_grid(scene, b, view, key="k")
+    names = sorted(t.text for t in made if hasattr(t, "text"))
+    assert names == ["1", "1", "2", "2", "A", "A", "B", "B"]
+    lines = [e for e in made if hasattr(e, "a")]
+    assert len(lines) == 4
+    assert all(e.layer == "KT-Trục" for e in made)
+
+
+def test_a_grid_with_a_duplicate_name_is_refused_at_build_time():
+    from core.building.builder import build
+    from core.building.model import Building
+
+    b = Building()
+    story = b.add_story("Tầng 1", 0.0, 3300.0)
+    grid = b.add_element("grid", story["id"], {"axes": [
+        {"name": "1", "dir": "y", "offset_mm": 0.0},
+        {"name": "1", "dir": "x", "offset_mm": 0.0}]})
+    with pytest.raises(ValueError):
+        build(b, grid)
+
+
+def test_reissuing_a_plan_replaces_its_grid_instead_of_stacking():
+    from core.building.drawings import draw_grid, view_for
+    from core.building.model import Building
+    from core.building.builder import build
+    from core.scene import Scene
+
+    b = Building()
+    story = b.add_story("Tầng 1", 0.0, 3300.0)
+    b.add_element("grid", story["id"], {"axes": [
+        {"name": "1", "dir": "y", "offset_mm": 0.0},
+        {"name": "A", "dir": "x", "offset_mm": 0.0}]})
+    for element in list(b.elements):
+        build(b, element)
+    scene = Scene()
+    view = D.view_for(b, {"kind": "story", "story_id": story["id"]})
+    draw_grid(scene, b, view, key="p")
+    first = len(scene.text_labels)
+    draw_grid(scene, b, view, key="p")
+    assert len(scene.text_labels) == first, "sinh lại không được xếp thêm trục"

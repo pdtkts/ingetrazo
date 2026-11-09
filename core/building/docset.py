@@ -213,7 +213,8 @@ def generate_docset(scene, building, project=None, story_ids=None,
                 sheet, view, scene,
                 name=f"{label_extra} {story_name}",
                 building=pass_building,
-                annotations=annotations and key == "plan")
+                annotations=annotations and key == "plan",
+                grid=annotations and key == "plan")
             tick(f"{label_extra} {story_name}", 1)
 
     # ---- elevations -----------------------------------------------------

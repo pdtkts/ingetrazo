@@ -356,6 +356,49 @@ def build_zone(building, element) -> tuple[None, dict]:
     }
 
 
+def build_grid(building, element) -> tuple[None, dict]:
+    """A grid is axis data, not a solid — nothing is drawn into the model.
+
+    But it is NOT a free pass: an axis with no name, or two axes sharing
+    one, is an error a reader would catch at the first sheet, so it is
+    caught here while the office can still fix the model.
+    """
+    params = element.get("params") or {}
+    axes = list(params.get("axes") or [])
+    if not axes:
+        raise ValueError("Trục thiếu danh sách trục.")
+    names = [str(a.get("name") or "").strip() for a in axes]
+    if any(not n for n in names):
+        raise ValueError("Có trục chưa đặt tên.")
+    if len(set(names)) != len(names):
+        raise ValueError("Tên trục bị trùng.")
+    for axis in axes:
+        if str(axis.get("dir") or "x") not in ("x", "y"):
+            raise ValueError("Trục chỉ chạy theo x hoặc y.")
+        float(axis.get("offset_mm") or 0.0)
+    return None, {
+        "axis_count": len(axes),
+        "frame_mm": _grid_frame(axes),
+    }
+
+
+def _grid_frame(axes) -> tuple:
+    """``(x0, y0, x1, y1)`` of the axes' crossing points, in mm.
+
+    Two families of lines cross; the four extremes of those crossings are
+    where the bubbles go, and they are what the grid's own bounding box
+    is. A grid with one family only (all vertical) frames as a line,
+    widened so a plan still has something to zoom to.
+    """
+    xs = sorted(float(a.get("offset_mm") or 0.0) for a in axes
+                if str(a.get("dir") or "x") == "y")
+    ys = sorted(float(a.get("offset_mm") or 0.0) for a in axes
+                if str(a.get("dir") or "x") == "x")
+    if not xs or not ys:
+        return (-1000.0, -1000.0, 1000.0, 1000.0)
+    return (xs[0], ys[0], xs[-1], ys[-1])
+
+
 # ---- dispatch ---------------------------------------------------------------
 
 #: ``type id -> builder``. Types not listed here (door, window, curtain wall,
@@ -368,6 +411,7 @@ BUILDERS = {
     "slab": build_slab,
     "ceiling": build_ceiling,
     "zone": build_zone,
+    "grid": build_grid,
 }
 
 

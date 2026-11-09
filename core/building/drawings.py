@@ -72,6 +72,13 @@ LEVEL_TEXT_MM = 2.5
 
 #: The layer every auto-annotation lands on, so a sheet can hide the lot.
 ANNOT_LAYER = "KT-Ghi chú"
+#: The layer the axis lines and their bubbles live on — a reader hides the
+#: grid when tracing and shows it when dimensioning.
+GRID_LAYER = "KT-Trục"
+
+#: How far past the outermost crossing an axis line reaches before its
+#: bubble — the trade's own gap, in model mm at 1:100.
+GRID_MARGIN_MM = 1200.0
 
 #: A far enough eye for a parallel view: the projection is parallel, so the
 #: distance is only what frames it (10 km keeps every depth divide sane).
@@ -500,6 +507,112 @@ def dimension_value(scene, value_m: float) -> str:
             pass                        # the drawing, not the model
     from core.units import fmt_len
     return fmt_len(value_m)
+
+
+def grid_axes(building, story) -> list:
+    """Every axis of a storey's grids, in model mm.
+
+    ``[(name, dir, offset_mm, lo, hi), …]`` — an axis is one straight
+    line, ``dir`` the axis it runs ALONG and ``lo``/``hi`` how far it
+    reaches (the other family's extremes plus the margin, which is where
+    its bubbles stand). Two grids stacked on one storey merge: an office
+    splits grids by block and reads them as one plan.
+    """
+    grids = [e for e in building.elements
+             if str(e.get("story_id")) == str(story["id"])
+             and e.get("type") == "grid"]
+    if not grids:
+        return []
+    out: list = []
+    all_x: list = []
+    all_y: list = []
+    for grid in grids:
+        for axis in (grid.get("params") or {}).get("axes") or ():
+            d = str(axis.get("dir") or "x")
+            (all_y if d == "x" else all_x).append(
+                float(axis.get("offset_mm") or 0.0))
+    if not all_x or not all_y:
+        return []
+    margin = float(GRID_MARGIN_MM)
+    for grid in grids:
+        params = grid.get("params") or {}
+        for axis in params.get("axes") or ():
+            d = str(axis.get("dir") or "x")
+            name = str(axis.get("name") or "").strip()
+            off = float(axis.get("offset_mm") or 0.0)
+            if d == "x":
+                out.append((name, "x", off, all_x[0] - margin,
+                            all_x[-1] + margin))
+            else:
+                out.append((name, "y", off, all_y[0] - margin,
+                            all_y[-1] + margin))
+    return out
+
+
+def _grid_pen(scene):
+    from core.layers import Layer
+    layer = scene.layer(GRID_LAYER)
+    if layer is None:
+        layer = Layer(GRID_LAYER)
+        scene.layers.append(layer)
+    return layer
+
+
+def draw_grid(scene, building, view: DrawingView, *, history=None,
+              key=None) -> list:
+    """Put a storey's grid on the plan: one line per axis, bubble at each end.
+
+    The bubble is the axis' own NAME — "1", "A" — which is what a
+    dimension or a note calls the line by; a grid without names is a
+    drawing nobody can talk about, so the name is the point of the
+    element, not decoration.
+    """
+    from core.history import AddTextLabelCommand
+    from core.textlabel import TextLabel
+
+    story = building.story(view.story_id) if view.story_id else None
+    if story is None:
+        return []
+    axes = grid_axes(building, story)
+    if not axes:
+        return []
+    _grid_pen(scene)
+    z_cut = (float(story.get("z_mm", 0.0))
+             + float(view.row.get("cut_mm") or DEFAULT_CUT_MM)) / 1000.0
+    made: list = []
+    for name, direction, offset, lo, hi in axes:
+        a = QVector3D(lo / 1000.0, offset / 1000.0, z_cut)
+        b = QVector3D(hi / 1000.0, offset / 1000.0, z_cut)
+        if direction == "x":
+            a = QVector3D(lo / 1000.0, offset / 1000.0, z_cut)
+            b = QVector3D(hi / 1000.0, offset / 1000.0, z_cut)
+        else:
+            a = QVector3D(offset / 1000.0, lo / 1000.0, z_cut)
+            b = QVector3D(offset / 1000.0, hi / 1000.0, z_cut)
+        if history is not None:
+            from core.history import AddEdgeCommand
+            history.execute(AddEdgeCommand(a, b))
+            edge = next((e for e in scene.mesh.edges
+                         if (QVector3D(e.a) - a).length() < 1e-6
+                         and (QVector3D(e.b) - b).length() < 1e-6), None)
+        else:
+            edge = scene.add_edge(a, b)
+        if edge is not None:
+            edge.layer = GRID_LAYER
+            made.append(edge)
+        for end in (a, b):
+            bubble = TextLabel(QVector3D(end.x(), end.y(), z_cut),
+                               QVector3D(0.0, 0.0, 0.0), name,
+                               layer=GRID_LAYER)
+            if history is not None:
+                history.execute(AddTextLabelCommand(bubble))
+            else:
+                scene.text_labels.append(bubble)
+            made.append(bubble)
+    if key:
+        _clear_annotations(scene, key)
+        scene.bim_annotations.setdefault(key, []).extend(made)
+    return made
 
 
 def annotate_plan(scene, building, view: DrawingView, *, history=None,

@@ -3121,6 +3121,7 @@
   "Trunk": "Thân cây",
   "Trunk seat": "Ghế cốp xe",
   "Trước điểm đầu": "Trước điểm đầu",
+  "Trục": "Trục",
   "Turn every face connected to the selected one so its front side matches.": "Xoay mọi mặt được kết nối với mặt đã chọn sao cho mặt trước của nó khớp với nhau.",
   "Turn the drawing inside the frame, clockwise — the same angle the north arrow needs. The frame, its title and everything else on the sheet stay put; the model is not touched. In view edit (double-click the frame) Shift+drag turns it by hand.": "Xoay bản vẽ bên trong khung, theo chiều kim đồng hồ - cùng góc mà mũi tên hướng bắc cần. Khung, tiêu đề của nó và mọi thứ khác trên tờ giấy vẫn được giữ nguyên; mô hình không được chạm vào. Trong chế độ xem chỉnh sửa (bấm đúp vào khung) Shift+kéo để xoay khung bằng tay.",
   "Turn the selected paths into edges of the model; a closed path becomes a face, ready to push up.": "Chuyển đổi các tim tuyến đã chọn thành các cạnh của mô hình; đường vạch khép kín sẽ tạo thành một bề mặt, sẵn sàng để đùn khối (Push/Pull).",

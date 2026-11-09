@@ -158,6 +158,16 @@ STAIR_DEFAULTS = {
     "step_material_id": DEFAULT_WALL, "ifc_class": "IfcStair",
 }
 
+#: A drawing grid is axis DATA, not a solid: it exists to be named on every
+#: plan and dimensioned from, which is what a reader looks for first. The
+#: `axes` list is ``[{"name": "A", "offset_mm": 0.0, "dir": "x"}, …]`` —
+#: an axis is one straight line across the plan, `dir` the axis it runs
+#: ALONG, `offset_mm` where it stands perpendicular to that.
+GRID_DEFAULTS = {
+    "name": "Trục", "axes": [], "bubble_mm": 600.0, "pen": 1,
+    "line_style": "dashdot", "show_bubble": True,
+}
+
 ZONE_DEFAULTS = {
     "name": "Phòng", "number": "", "category": "khac", "pen": 1,
     "show_area": True, "show_fill": False, "line_style": "dashed",
@@ -184,6 +194,7 @@ BY_TYPE = {
     "roof": ROOF_DEFAULTS,
     "stair": STAIR_DEFAULTS,
     "zone": ZONE_DEFAULTS,
+    "grid": GRID_DEFAULTS,
     "fixture": FIXTURE_DEFAULTS,
     "custom": CUSTOM_DEFAULTS,
 }
@@ -207,6 +218,7 @@ IFC_CLASS_OF = {
     "roof": "IfcRoof",
     "stair": "IfcStair",
     "zone": "IfcSpace",
+    "grid": "IfcGrid",
     "fixture": "IfcSanitaryTerminal",
     "custom": "IfcBuildingElementProxy",
 }

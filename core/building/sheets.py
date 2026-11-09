@@ -245,7 +245,7 @@ def sheet_index_text(sheets, project: dict | None = None) -> str:
 
 
 def fill_sheet(sheet, view, scene, *, name: str = "", annotations: bool = True,
-               building=None, area=None):
+               building=None, area=None, grid: bool = False):
     """Fill a sheet with one drawing: its frame, and the sheet's own text.
 
     The composition is deliberate — the drawing in the middle, its title
@@ -283,6 +283,11 @@ def fill_sheet(sheet, view, scene, *, name: str = "", annotations: bool = True,
     head.y_mm = margin
     if area is not None:
         area.clear()
+    if building is not None and bool(grid):
+        # The axes go down BEFORE the dimensions: a dimension is read
+        # against the grid, and the two annotators both key on the scene
+        # name, so re-issuing replaces both rather than doubling either.
+        _drawings.draw_grid(scene, building, view, key=f"{scene_name}·grid")
     if building is not None and bool(annotations):
         # The key is the drawing's name: re-issuing this sheet REPLACES what
         # the previous run wrote instead of stacking a second set on it.
