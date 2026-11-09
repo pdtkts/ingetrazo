@@ -2942,6 +2942,170 @@ class MainWindow(QMainWindow):
         panel_action.triggered.connect(self._on_show_building_panel)
         menu.addAction(panel_action)
 
+        # ---- the drawing set, the schedule and the exchange -------------
+        menu.addSeparator()
+        docset_action = QAction(tr("Lập hồ sơ tự động…"), self)
+        docset_action.setStatusTip(tr(
+            "Sinh toàn bộ bộ bản vẽ (mặt bằng, mặt đứng, mặt cắt, chi "
+            "tiết) từ mô hình, kèm bảng liệt kê tờ."))
+        docset_action.triggered.connect(self._on_generate_docset)
+        menu.addAction(docset_action)
+
+        check_action = QAction(tr("Kiểm tra hồ sơ…"), self)
+        check_action.setStatusTip(tr(
+            "Xem trước những gì bộ bản vẽ còn thiếu trước khi sinh."))
+        check_action.triggered.connect(self._on_check_docset)
+        menu.addAction(check_action)
+
+        takeoff_action = QAction(tr("Bảng thống kê (CSV)…"), self)
+        takeoff_action.setStatusTip(tr(
+            "Xuất khối lượng theo bảng (phòng, cửa, tường, sàn, cột, "
+            "dầm) ra CSV — dấu chấm phẩy, mã hoá cho Excel Việt Nam."))
+        takeoff_action.triggered.connect(self._on_export_takeoff_csv)
+        menu.addAction(takeoff_action)
+
+        dxf_action = QAction(tr("Xuất DXF bản vẽ…"), self)
+        dxf_action.setStatusTip(tr(
+            "Xuất mặt bằng hiện hành ra DXF: nét, hatch mặt cắt, kích "
+            "thước và chữ, theo layer của mô hình."))
+        dxf_action.triggered.connect(self._on_export_plan_dxf)
+        menu.addAction(dxf_action)
+
+    # ---- BIM menu actions ---------------------------------------------------
+
+    def _bim_building(self):
+        """The live building, or None with a word to the user."""
+        from core.building.model import building_of
+        from PySide6.QtWidgets import QMessageBox
+        building = building_of(self.viewport.scene)
+        if not building.stories:
+            QMessageBox.information(
+                self, tr("BIM"),
+                tr("Mô hình chưa có tầng nào — hãy tạo tầng trước."))
+            return None
+        return building
+
+    def _on_check_docset(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from core.building import docset as _docset
+        building = self._bim_building()
+        if building is None:
+            return
+        issues = _docset.check_docset(building)
+        if not issues:
+            QMessageBox.information(self, tr("Kiểm tra hồ sơ"),
+                                    tr("Hồ sơ đủ để sinh bản vẽ."))
+            return
+        lines = [f"• {text}" for text, _severity in issues]
+        QMessageBox.information(
+            self, tr("Kiểm tra hồ sơ"),
+            tr("Còn thiếu trước khi sinh:") + "\n" + "\n".join(lines))
+
+    def _on_generate_docset(self) -> None:
+        """Lập hồ sơ: generate the whole drawing set, with a progress bar.
+
+        Generation can take seconds on a real building, and a window that
+        freezes without a word reads as a crash — so it reports each sheet
+        as it is filled, and the user sees the set appear.
+        """
+        from PySide6.QtWidgets import (QApplication, QMessageBox,
+                                       QProgressDialog)
+        from core.building import docset as _docset
+        building = self._bim_building()
+        if building is None:
+            return
+        scene = self.viewport.scene
+        issues = _docset.check_docset(building)
+        warnings = [t for t, sev in issues if sev == "warn"]
+        if warnings:
+            answer = QMessageBox.question(
+                self, tr("Lập hồ sơ tự động"),
+                tr("%d điểm cần lưu ý:") % len(warnings) + "\n"
+                + "\n".join(f"• {t}" for t in warnings[:6])
+                + "\n\n" + tr("Vẫn sinh hồ sơ?"))
+            if answer != QMessageBox.Yes:
+                return
+        dlg = QProgressDialog(tr("Đang lập hồ sơ…"), "", 0, 100, self)
+        dlg.setCancelButton(None)
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setAutoClose(False)
+
+        def progress(index, total, label):
+            dlg.setValue(int(100.0 * index / max(total, 1)))
+            dlg.setLabelText(tr(label))
+            QApplication.processEvents()
+
+        dlg.setValue(0)
+        try:
+            result = _docset.generate_docset(scene, building,
+                                             progress=progress)
+        except Exception as exc:                    # noqa: BLE001 — reported
+            dlg.reset()
+            QMessageBox.warning(self, tr("Lập hồ sơ tự động"),
+                                f"{type(exc).__name__}: {exc}")
+            return
+        dlg.setValue(100)
+        dlg.reset()
+        self.viewport.update()
+        QMessageBox.information(
+            self, tr("Lập hồ sơ tự động"),
+            tr("Đã sinh %d tờ, %d tờ có bản vẽ.")
+            % (len(result.sheets),
+               len([s for s in result.sheets if s.frames])))
+
+    def _on_export_takeoff_csv(self) -> None:
+        from core.building import takeoff as _takeoff
+        from PySide6.QtWidgets import QMessageBox
+        from views.filedialogs import file_dialogs
+        building = self._bim_building()
+        if building is None:
+            return
+        path, _flt = file_dialogs.getSaveFileName(
+            self, tr("Xuất bảng thống kê"), "thong-ke.csv",
+            tr("CSV (*.csv)"))
+        if not path:
+            return
+        try:
+            text = _takeoff.all_csv(building)
+            with open(path, "w", encoding="utf-8", newline="") as handle:
+                handle.write(text)
+        except OSError as exc:
+            QMessageBox.warning(self, tr("Bảng thống kê"), str(exc))
+            return
+        QMessageBox.information(self, tr("Bảng thống kê"),
+                                tr("Đã ghi %s") % path)
+
+    def _on_export_plan_dxf(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from views.filedialogs import file_dialogs
+        from core.building import drawings as _drawings
+        from formats.dxf_bim import save_plan_dxf
+        building = self._bim_building()
+        if building is None:
+            return
+        scene = self.viewport.scene
+        stories = list(building.stories)
+        active = str(building.settings.get("active_story") or
+                     stories[0]["id"])
+        story = building.story(active) or stories[0]
+        path, _flt = file_dialogs.getSaveFileName(
+            self, tr("Xuất DXF bản vẽ"), "mat-bang.dxf",
+            tr("DXF (*.dxf)"))
+        if not path:
+            return
+        try:
+            counts = save_plan_dxf(path, scene, building, str(story["id"]))
+        except Exception as exc:                    # noqa: BLE001 — reported
+            QMessageBox.warning(self, tr("Xuất DXF"),
+                                f"{type(exc).__name__}: {exc}")
+            return
+        del _drawings
+        QMessageBox.information(
+            self, tr("Xuất DXF"),
+            tr("Đã ghi %s: %d nét, %d vùng tô, %d kích thước, %d chữ.")
+            % (path, counts["lines"], counts["hatch"],
+               counts["dimensions"], counts["text"]))
+
     def _on_show_building_panel(self) -> None:
         """Bring the BIM dock (Building + tagging) forward."""
         tray = getattr(self, "bim_tray", None)

@@ -1,0 +1,156 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marco Sumari Tellez and IngeTrazo contributors.
+"""The BIM menu is where the office does the work: the set, the check,
+the schedule, the DXF. A menu entry that opens nothing is worse than a
+missing one, so each is exercised here.
+"""
+from __future__ import annotations
+
+import os
+import sys
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest  # noqa: E402
+from PySide6.QtWidgets import (QApplication, QFileDialog,  # noqa: E402
+                               QMessageBox)
+
+if QApplication.instance() is None:
+    QApplication(sys.argv[:1])
+
+
+@pytest.fixture()
+def window():
+    """A fresh window per test.
+
+    Each test drives a menu action against a live document, and the actions
+    write into it (sheets, scenes, dimensions): sharing one window would
+    make a result depend on which test ran first.
+    """
+    from views.main_window import MainWindow
+    win = MainWindow()
+    yield win
+    # NEVER close a window holding an edited document: ``closeEvent`` asks
+    # to save, and a modal question in a headless run never returns (it hung
+    # this file for minutes). The window is disposed with the process.
+    win.hide()
+
+
+def _house(win, storeys: int = 2):
+    from core.history import History
+    from core.building import building_of
+    from core.building.builder import build
+    from core.building.commands import add_element, add_story
+    scene = win.viewport.scene
+    history = win.viewport.history
+    building = building_of(scene)
+    rows = []
+    for i in range(storeys):
+        history.execute(add_story(f"Tầng {i + 1}", i * 3300.0, 3300.0))
+        rows.append(building.stories[-1])
+    for i, story in enumerate(rows):
+        history.execute(add_element("wall", story["id"], {
+            "baseline_start_mm": [0, 0], "baseline_end_mm": [6000, 0],
+            "thickness_mm": 200.0, "height_mm": 3300.0, "top_link": "next"}))
+        history.execute(add_element("zone", story["id"], {
+            "outline_mm": [[0, 0], [6000, 0], [6000, 4000], [0, 4000]],
+            "name": f"Phòng {i + 1}"}))
+    zone = building.elements[-1]
+    _mesh, derived = build(building, zone)
+    zone["derived"] = derived
+    from core.building.scene_sync import sync
+    sync(scene, building)
+    return building, scene, history
+
+
+def test_the_menu_offers_the_whole_office_workflow(window):
+    labels = [a.text() for a in window._bim_menu.actions()]
+    for wanted in ("Lập hồ sơ tự động…", "Kiểm tra hồ sơ…",
+                   "Bảng thống kê (CSV)…", "Xuất DXF bản vẽ…",
+                   "Building panel"):
+        assert wanted in labels, wanted
+
+
+def test_generating_the_docset_from_the_menu_fills_the_sheets(
+        window, monkeypatch):
+    """A complete house needs no question: it generates and says how many."""
+    building, scene, _history = _house(window)
+    asked: list = []
+    told: list = []
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: asked.append(a)
+                                     or QMessageBox.Yes))
+    monkeypatch.setattr(QMessageBox, "information",
+                        staticmethod(lambda *a, **k: told.append(a)))
+    started = len(scene.compositions)
+    window._on_generate_docset()
+    assert len(scene.compositions) > started
+    assert any(sheet.frames for sheet in scene.compositions)
+    assert not asked, "hồ sơ đủ thì không hỏi gì"
+    assert told, "phải báo đã sinh bao nhiêu tờ"
+
+
+def test_the_menu_asks_before_generating_an_incomplete_set(
+        window, monkeypatch):
+    """A missing room or wall is stated BEFORE the run, and a No stops it."""
+    _building, scene, _history = _house(window, storeys=1)
+    # A storey with nothing on it: the check calls that a WARNING (a plan
+    # with no walls is an empty sheet, which looks like success until it is
+    # printed). A missing room is only an INFO — an office may legitimately
+    # not have zoned the model yet, and that must not block the run.
+    from core.building import building_of
+    building = building_of(scene)
+    building.elements[:] = []
+    asked: list = []
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: asked.append(a)
+                                     or QMessageBox.No))
+    monkeypatch.setattr(QMessageBox, "information",
+                        staticmethod(lambda *a, **k: None))
+    before = list(scene.compositions)
+    window._on_generate_docset()
+    assert asked, "thiếu tường phải hỏi trước khi sinh"
+    assert list(scene.compositions) == before, "trả lời Không thì không sinh"
+
+
+def test_the_check_reports_before_anything_is_written(window, monkeypatch):
+    """An empty model must be told, not silently given nothing."""
+    shown: list = []
+    monkeypatch.setattr(QMessageBox, "information",
+                        staticmethod(lambda *a, **k: shown.append(a)))
+    window._on_check_docset()              # no storeys: the word goes out
+    assert shown
+    assert any("tầng" in str(arg) for arg in shown[0])
+
+
+def test_the_takeoff_grows_a_csv_the_vietnamese_excel_opens(
+        window, tmp_path, monkeypatch):
+    building, scene, _history = _house(window)
+    path = tmp_path / "thong-ke.csv"
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        staticmethod(lambda *a, **k: (str(path), "")))
+    monkeypatch.setattr(QMessageBox, "information",
+                        staticmethod(lambda *a, **k: None))
+    window._on_export_takeoff_csv()
+    # Read the BYTES: ``read_text`` translates newlines, so a test that
+    # asserts CRLF through it would pass on a file Excel chokes on.
+    raw = path.read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf")      # the BOM Excel needs
+    assert b";" in raw and b"\r\n" in raw
+    assert "THỐNG KÊ TƯỜNG".encode("utf-8") in raw
+
+
+def test_the_dxf_action_writes_a_drawing(window, tmp_path, monkeypatch):
+    building, scene, _history = _house(window, storeys=2)
+    path = tmp_path / "mat-bang.dxf"
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        staticmethod(lambda *a, **k: (str(path), "")))
+    monkeypatch.setattr(QMessageBox, "information",
+                        staticmethod(lambda *a, **k: None))
+    window._on_export_plan_dxf()
+    assert path.exists()
+    import ezdxf
+    doc = ezdxf.readfile(str(path))
+    assert any(e.dxftype() == "LINE" for e in doc.modelspace())

@@ -205,9 +205,18 @@ def element_layer(kind: str) -> str:
     possible at all: it shows one trade and hides the rest, and a plan's
     view filter picks what a reader may see. It is also how an office is
     already used to working — the layer list is the model's own index.
+
+    Translated through the app's own table, so a Vietnamese office reads
+    «BIM Tường» and an English one «BIM Wall» — and the layout filter
+    builds its list from this same call, so the two always agree.
     """
-    label = TR_NAMES.get(str(kind))
-    return BIM_LAYER_PREFIX + (label or "Khác")
+    label = TR_NAMES.get(str(kind)) or "Khác"
+    try:
+        from core.i18n import tr
+        label = tr(label)
+    except Exception:                   # noqa: BLE001 — a missing catalogue
+        pass                            # must not cost the layer its name
+    return BIM_LAYER_PREFIX + label
 
 
 #: Element type → the label the Browser and the drawings use. The English
