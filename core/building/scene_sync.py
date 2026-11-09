@@ -273,8 +273,16 @@ def sync(scene, building=None, element_ids=None, force: bool = False):
 
     if built or removed:
         scene.version += 1
-    if errors:
-        scene.building_errors = errors
+    # The error list belongs to the elements this call EXAMINED: an element
+    # that just built fine is no longer a failure, and leaving its old
+    # message standing made the panel warn about something the user had
+    # already fixed — for the life of the session, because nothing else
+    # ever cleared it. An element this call never looked at keeps whatever
+    # it had: a targeted rebuild must not report its neighbours as fixed.
+    kept = [(str(eid), str(why))
+            for eid, why in (getattr(scene, "building_errors", None) or ())
+            if str(eid) not in {str(el["id"]) for el in targets}]
+    scene.building_errors = kept + errors
     return built, removed
 
 

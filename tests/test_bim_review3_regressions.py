@@ -792,3 +792,60 @@ def test_the_lens_goes_down_with_the_plan():
     plan.hide()
     assert not plan._lens.isVisible(), "kính lúp còn nổi sau khi đóng Plan"
     win.hide()
+
+
+def test_a_fixed_element_stops_being_reported_as_broken():
+    """`scene.building_errors` was only ever ASSIGNED when there were new
+    errors, so the message for an element the user had already fixed
+    stayed on the panel for the rest of the session — a warning about
+    something that is no longer true teaches a user to ignore the panel."""
+    from core.building import commands as C
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.building.scene_sync import sync
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    history = History(scene)
+    S.build_sample(history, scene, "townhouse")
+    wall = next(e for e in building_of(scene).elements
+                if e.get("type") == "wall")
+
+    broken = C.set_params(str(wall["id"]), {"thickness_mm": -50.0})
+    broken._rebuild = lambda s, b: sync(s, b)
+    history.execute(broken)
+    assert scene.building_errors, "không báo lỗi khi tường sai"
+
+    fixed = C.set_params(str(wall["id"]), {"thickness_mm": 200.0})
+    fixed._rebuild = lambda s, b: sync(s, b)
+    history.execute(fixed)
+    assert not scene.building_errors, \
+        f"vẫn báo lỗi của cấu kiện đã sửa xong: {scene.building_errors}"
+
+
+def test_a_targeted_rebuild_does_not_clear_another_element_s_error():
+    """The list belongs to the elements a sync EXAMINED: a targeted rebuild
+    of the wall must not report the broken slab beside it as fixed."""
+    from core.building import commands as C
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.building.scene_sync import sync
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    history = History(scene)
+    S.build_sample(history, scene, "townhouse")
+    slab = next(e for e in building_of(scene).elements
+                if e.get("type") == "slab")
+    wall = next(e for e in building_of(scene).elements
+                if e.get("type") == "wall")
+
+    broken = C.set_params(str(slab["id"]), {"thickness_mm": -10.0})
+    broken._rebuild = lambda s, b: sync(s, b)
+    history.execute(broken)
+    assert scene.building_errors
+
+    sync(scene, building_of(scene), element_ids=[str(wall["id"])])
+    assert scene.building_errors, "dựng lại một tường lại xoá lỗi của sàn"
