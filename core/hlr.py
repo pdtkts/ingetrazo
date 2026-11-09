@@ -1235,13 +1235,12 @@ def hlr_perspective(scene, camera, geometry=None) -> np.ndarray:
         tris, hard, soft = collect_geometry(scene)
     else:
         tris, hard, soft, soft_n = geometry
-    # ``section`` lets a DRAWING bring its own cut (a plan's +1200 plane
-    # need not be the one the user has active in the viewport); without it
-    # the scene's active cut is used, exactly as the viewport shows it.
-    sp = section if section is not None else (
-        scene.active_section()
-        if getattr(scene, "show_section_cuts", True)
-        and hasattr(scene, "active_section") else None)
+    # The scene's own active cut, exactly as the viewport shows it:
+    # hlr_perspective takes no override — a DRAWING that needs its own cut
+    # goes through hlr_drawing, which passes one explicitly.
+    sp = (scene.active_section()
+          if getattr(scene, "show_section_cuts", True)
+          and hasattr(scene, "active_section") else None)
     cut: list = []
     if sp is not None:
         if soft_n is not None:
