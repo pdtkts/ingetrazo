@@ -281,6 +281,11 @@ def _open_plan_commands() -> frozenset:
 
 OPEN_PLAN_COMMANDS = _open_plan_commands()
 
+#: Layout commands the WINDOW runs itself (they act on the sheet in front
+#: of the composer, which only the composer knows).
+SHEET_COMMANDS = frozenset({"sheet_frame"})
+
+
 #: Where a registry command's own id differs from the app's tool key.
 #:
 #: The registry names a command the way the WORKSPACE names it; the app
@@ -3264,6 +3269,54 @@ class MainWindow(QMainWindow):
 
     # ---- BIM menu actions ---------------------------------------------------
 
+    def _run_sheet_command(self, cmd_id: str) -> None:
+        """Run a layout command on the sheet in front of the composer."""
+        from PySide6.QtWidgets import QMessageBox
+
+        composer = getattr(self, "composer", None)
+        if composer is None:
+            QMessageBox.information(
+                self, tr("Khung tờ giấy"),
+                tr("Mở cửa sổ Bố cục (Composer) trước — khung tờ giấy là "
+                   "của một TỜ, không của mô hình."))
+            return
+        # ``self.comp`` is the sheet the composer is showing — the same
+        # attribute every other sheet action reads.
+        sheet = getattr(composer, "comp", None)
+        if sheet is None:
+            QMessageBox.information(
+                self, tr("Khung tờ giấy"),
+                tr("Chưa có tờ nào đang mở trong Bố cục."))
+            return
+        if cmd_id == "sheet_frame":
+            self._add_sheet_frame(sheet)
+
+    def _add_sheet_frame(self, sheet) -> None:
+        """The office's border and title block, on the sheet in front."""
+        from PySide6.QtWidgets import QMessageBox
+        from core.building import sheets as _sheets
+        from core.building.model import building_of
+
+        scene = self.viewport.scene
+        building = building_of(scene)
+        made = _sheets.sheet_frame(scene, building, sheet)
+        if not any(made.values()):
+            QMessageBox.information(
+                self, tr("Khung tờ giấy"),
+                tr("Tờ này đã có khung và khung tên rồi."))
+            return
+        composer = getattr(self, "composer", None)
+        if composer is not None and hasattr(composer, "refresh"):
+            composer.refresh()
+        self.viewport.notify_scene_changed()
+        QMessageBox.information(
+            self, tr("Khung tờ giấy"),
+            tr("Đã thêm %s cho tờ «%s» — khung tên lấy số liệu từ «Thông "
+               "tin dự án…».")
+            % (", ".join(tr("khung") if key == "border" else tr("khung tên")
+                         for key, on in made.items() if on),
+               str(sheet.name or "")))
+
     def _on_project_info(self) -> None:
         """The job's own data — the title block every sheet prints."""
         from views.project_dialog import open_project_info
@@ -3555,6 +3608,7 @@ class MainWindow(QMainWindow):
         tool = COMMAND_TOOLS_FOR_MENU.get(str(cmd_id), str(cmd_id))
         available = tool in getattr(self, "_tools", {}) or \
             str(tool) in ("magnifier",) or \
+            str(cmd_id) in SHEET_COMMANDS or \
             str(tool) in OPEN_PLAN_COMMANDS
         action.setStatusTip(tr(label))
         if not available:
@@ -3569,6 +3623,9 @@ class MainWindow(QMainWindow):
 
     def _run_bim_command(self, tool: str, cmd_id: str) -> None:
         """Run one registry command: the plan's own, or the app's tool."""
+        if str(cmd_id) in SHEET_COMMANDS:
+            self._run_sheet_command(str(cmd_id))
+            return
         if tool in OPEN_PLAN_COMMANDS:
             self._on_open_plan_window()
             plan = getattr(self, "_plan_window", None)

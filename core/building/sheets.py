@@ -171,6 +171,47 @@ def _group_number(group: str) -> int:
     return len(GROUPS)
 
 
+def sheet_frame(scene, building, sheet, *, border: bool = True,
+                block: bool = True) -> dict:
+    """Put the office's frame on ONE sheet: the border, the title block.
+
+    What **Lập hồ sơ tự động** does for a whole set, a user asks for on the
+    sheet they are working on — «khung tờ giấy» is a command, not a side
+    effect of issuing the set, and a sheet drawn by hand has no border at
+    all until somebody puts one there.
+
+    The block is filled from the JOB's data (``building.project``), the same
+    one the set uses, so a hand-framed sheet and an issued one state the
+    same job. Returns what it added, so the caller can say so.
+    """
+    from core.building import drawings as _drawings
+
+    made = {"border": False, "block": False}
+    if border and not getattr(sheet, "frames", None):
+        sheet.frames.append(sheet.default_frame())
+        made["border"] = True
+    if block and getattr(sheet, "cajetin", None) is None:
+        project = dict(getattr(building, "project", {}) or {})
+        name = str(sheet.name or "").strip() or tr("BẢN VẼ")
+        spec = SheetSpec(key="manual", group="plan", label="", title=name,
+                         scale_denom=int(getattr(sheet, "scale", 50) or 50),
+                         paper=str(sheet.paper or "A3"),
+                         landscape=bool(sheet.landscape))
+        _title_block_of(sheet, project, spec,
+                        str(getattr(sheet, "bim_code", "") or ""))
+        made["block"] = True
+    scene.version += 1
+    del _drawings
+    return made
+
+
+def _title_block_of(sheet, project, spec, code):
+    """``title_block`` with the sheet's own revision read from the project."""
+    return title_block(sheet, project, spec,
+                       code or str(project.get("name") or "KT-01"),
+                       revision=str(project.get("revision") or ""))
+
+
 def title_block(sheet: Composicion, project: dict, spec: SheetSpec,
                 code: str, *, revision: str = "") -> Cajetin:
     """Fill the Vietnamese title block of ``sheet`` from the project data.
