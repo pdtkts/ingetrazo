@@ -2936,6 +2936,13 @@ class MainWindow(QMainWindow):
         menu.addMenu(design)
 
         menu.addSeparator()
+        plan_action = QAction(tr("Cửa sổ Plan…"), self)
+        plan_action.setStatusTip(tr(
+            "Mở mặt bằng tầng đang chọn: đúng quy tắc cắt của bản vẽ "
+            "phát hành, có thanh công cụ và bảng phím tắt của cửa sổ Plan."))
+        plan_action.triggered.connect(self._on_open_plan_window)
+        menu.addAction(plan_action)
+
         panel_action = QAction(tr("Building panel"), self)
         panel_action.setStatusTip(tr(
             "Storeys, elements and their parameters in one panel."))
@@ -3063,6 +3070,14 @@ class MainWindow(QMainWindow):
         dlg = DocSetDialog(self, building, self.viewport.scene)
         dlg.finished.connect(lambda _code: self.viewport.update())
         dlg.open()
+
+    def _on_open_plan_window(self) -> None:
+        """Cửa sổ Plan: the flat view the office measures from."""
+        from views.plan_window import open_plan_window
+        window = open_plan_window(self)
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
     def _on_insert_library_detail(self) -> None:
         """Put one of the standard details on the sheet being edited."""
