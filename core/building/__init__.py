@@ -25,6 +25,6 @@ element both bill quantities through the same quantity functions.
 """
 from __future__ import annotations
 
-from core.building.model import Building, building_of
+from core.building.model import Building, building_of, store
 
-__all__ = ["Building", "building_of"]
+__all__ = ["Building", "building_of", "store"]

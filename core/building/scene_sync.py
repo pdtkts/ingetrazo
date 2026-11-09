@@ -58,6 +58,19 @@ def _signature(building, element) -> tuple:
     )
 
 
+def _same_signature(stored, signature) -> bool:
+    """Compare a signature against the one a group carries.
+
+    The stored copy went through JSON (``.igz``), where tuples are lists, so
+    the comparison normalises both sides the same way — otherwise a reopened
+    document rebuilds everything once for no reason.
+    """
+    if stored is None:
+        return False
+    import json
+    return stored == json.loads(json.dumps(list(signature)))
+
+
 def _freeze(value):
     """A hashable, order-stable copy of a JSON-ish value."""
     if isinstance(value, dict):
@@ -126,7 +139,7 @@ def sync(scene, building=None, element_ids=None, force: bool = False):
         group = group_for(scene, str(element["id"]))
         if not force and group is not None:
             ext = group.ext or {}
-            if ext.get(EXT_KEY, {}).get("sig") == list(signature):
+            if _same_signature(ext.get(EXT_KEY, {}).get("sig"), signature):
                 continue
         try:
             mesh, derived = builders.build(building, element)
