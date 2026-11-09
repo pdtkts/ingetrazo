@@ -265,3 +265,25 @@ def test_the_docset_screen_reports_a_blank_sheet_instead_of_hiding_it(window):
     assert not any("Tờ chưa có nội dung" in t for t in texts), \
         "bộ tờ này không được phát hành tờ trắng nào"
     dlg.close()
+
+
+def test_the_menu_offers_the_library_details(window, monkeypatch):
+    """The standard details must be reachable from the menu, and leave
+    editable items on a sheet — not a picture of a detail."""
+    from PySide6.QtWidgets import QComboBox, QDialog, QMessageBox
+    from core.building import detail_lib as DL
+    building, scene, _history = _house(window)
+    _generate_through_the_screen(window)
+    sheet = scene.compositions[-1]
+    before = (len(sheet.shapes), len(sheet.etiquetas))
+    monkeypatch.setattr(QDialog, "exec",
+                        lambda self: QDialog.Accepted)
+    told: list = []
+    monkeypatch.setattr(QMessageBox, "information",
+                        staticmethod(lambda *a, **k: told.append(a)))
+    window._on_insert_library_detail()
+    assert told, "phải xác nhận đã đặt chi tiết"
+    assert (len(sheet.shapes), len(sheet.etiquetas)) != before
+    assert sheet.shapes and sheet.etiquetas
+    assert any(str(t.list_name).startswith("__detail__") for t in sheet.texts)
+    del QComboBox, DL

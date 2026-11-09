@@ -2978,6 +2978,14 @@ class MainWindow(QMainWindow):
         dxf_action.triggered.connect(self._on_export_plan_dxf)
         menu.addAction(dxf_action)
 
+        detail_action = QAction(tr("Chi tiết thư viện…"), self)
+        detail_action.setStatusTip(tr(
+            "Chèn chi tiết cấu tạo có sẵn (sàn, mái, thang, khuôn cửa, "
+            "vệ sinh) lên tờ đang chọn — chi tiết là các đối tượng sửa "
+            "được, không phải ảnh."))
+        detail_action.triggered.connect(self._on_insert_library_detail)
+        menu.addAction(detail_action)
+
     # ---- BIM menu actions ---------------------------------------------------
 
     def _bim_building(self):
@@ -3055,6 +3063,54 @@ class MainWindow(QMainWindow):
         dlg = DocSetDialog(self, building, self.viewport.scene)
         dlg.finished.connect(lambda _code: self.viewport.update())
         dlg.open()
+
+    def _on_insert_library_detail(self) -> None:
+        """Put one of the standard details on the sheet being edited."""
+        from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox,
+                                       QFormLayout, QMessageBox, QSpinBox)
+        from core.building import detail_lib as _detail_lib
+
+        sheet = None
+        composer = getattr(self, "_composer", None)
+        if composer is not None:
+            sheet = getattr(composer, "current_sheet", None)
+        if sheet is None:
+            compositions = list(getattr(self.viewport.scene, "compositions",
+                                        ()) or ())
+            sheet = compositions[-1] if compositions else None
+        if sheet is None:
+            QMessageBox.information(
+                self, tr("Chi tiết thư viện"),
+                tr("Chưa có tờ nào — hãy lập hồ sơ hoặc mở một bộ tờ trước."))
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(tr("Chi tiết thư viện"))
+        form = QFormLayout(dlg)
+        pick = QComboBox()
+        for key in _detail_lib.keys():
+            pick.addItem(_detail_lib.name(key), key)
+        form.addRow(tr("Chi tiết:"), pick)
+        scale = QSpinBox()
+        scale.setRange(5, 100)
+        scale.setValue(10)
+        scale.setSuffix(" : 1")
+        form.addRow(tr("Tỷ lệ 1:"), scale)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok
+                                   | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        made = _detail_lib.insert_detail_on_sheet(
+            sheet, pick.currentData(), scale_denom=float(scale.value()))
+        self.viewport.update()
+        QMessageBox.information(
+            self, tr("Chi tiết thư viện"),
+            tr("Đã đặt %s lên tờ %s (1:%d).")
+            % (made["name"], str(getattr(sheet, "name", "")),
+               int(made["scale"])))
 
     def _on_export_takeoff_csv(self) -> None:
         from core.building import takeoff as _takeoff
