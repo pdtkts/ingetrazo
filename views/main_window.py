@@ -3002,6 +3002,15 @@ class MainWindow(QMainWindow):
                 design.addAction(action)
         menu.addMenu(design)
 
+        grid_action = QAction(tr("Trục…"), self)
+        grid_action.setStatusTip(tr(
+            "Khai lưới trục của tầng đang vẽ: tên trục (1, 2, A, B…) và vị "
+            "trí, hoặc lấy thẳng từ các tường đã dựng. Trục là cách cả công "
+            "trường gọi tên vị trí, nên mặt bằng in ra và người ngoài công "
+            "trường đọc cùng một bộ."))
+        grid_action.triggered.connect(self._on_edit_grid)
+        menu.addAction(grid_action)
+
         menu.addSeparator()
         plan_action = QAction(tr("Cửa sổ Plan…"), self)
         plan_action.setStatusTip(tr(
@@ -3267,6 +3276,12 @@ class MainWindow(QMainWindow):
                counts["openings"],
                counts["storeys"] + counts["walls"] + counts["openings"]
                + counts.get("counters", 0)), 6000)
+
+    def _on_edit_grid(self) -> None:
+        """Trục: the storey's grid, as a model element the sheets read."""
+        from views.grid_dialog import open_grid
+
+        open_grid(self)
 
     def _on_manage_pens(self) -> None:
         """Bút vẽ & Lớp bản vẽ: the office's own inking table."""
