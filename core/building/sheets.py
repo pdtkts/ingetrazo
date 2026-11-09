@@ -200,9 +200,13 @@ def ensure_sheets(scene, building, project=None, story_ids=None,
                   elevations: bool = True, sections: bool = True) -> list:
     """Create (or find) the sheets of the project's drawing set.
 
-    Returns the ``Composicion`` objects in issue order. An existing sheet with
-    the same name is reused, so running this twice updates the set instead of
-    duplicating it — the behaviour a re-issue needs.
+    Returns the ``Composicion`` objects in issue order. The set is
+    rebuilt ATOMICALLY: a sheet whose identity the plan still asks for is
+    reused (so a re-issue keeps the drawings the office may have edited),
+    and every sheet left over from a previous issue is removed from the
+    document. Reuse by code alone is not enough — the codes are positional,
+    so inserting a storey renumbers the ones below it and the previous
+    issue's sheets would linger beside the new set, doubling the document.
     """
     project = dict(project or building.project or {})
     specs = sheet_plan(building, story_ids, elevations=elevations,
@@ -223,8 +227,26 @@ def ensure_sheets(scene, building, project=None, story_ids=None,
         title_block(sheet, project, spec, code,
                     revision=str(project.get("revision") or ""))
         made.append(sheet)
+    _drop_superseded_sheets(scene, made)
     scene.version += 1
     return made
+
+
+def _drop_superseded_sheets(scene, made) -> list:
+    """Remove the sheets of a previous issue that the plan no longer asks for.
+
+    Only sheets that LOOK like this set's (a ``KT`` code) are considered:
+    a sheet the user drew by hand is not the generator's to delete.
+    """
+    keep = {id(sheet) for sheet in made}
+    gone = [sheet for sheet in scene.compositions
+            if id(sheet) not in keep
+            and str(getattr(sheet, "name", "")).startswith(f"{SHEET_PREFIX}")]
+    if not gone:
+        return []
+    scene.compositions[:] = [sheet for sheet in scene.compositions
+                             if sheet not in gone]
+    return gone
 
 
 def sheet_index_text(sheets, project: dict | None = None) -> str:
@@ -265,6 +287,14 @@ def fill_sheet(sheet, view, scene, *, name: str = "", annotations: bool = True,
     if frame is None:
         frame = _drawings.place_on_sheet(sheet, view, scene, name=scene_name)
     else:
+        # Re-issuing: refresh the frame AND the scene behind it. A reused
+        # frame whose scene still carries the last issue's camera keeps
+        # printing the old cut — the drawing would show a storey that has
+        # since risen at the height it used to have. place_on_sheet finds
+        # the existing scene by name and rewrites its rule, so it is the
+        # right call for both paths.
+        _drawings.place_on_sheet(sheet, view, scene, name=scene_name,
+                                 replace=frame)
         frame.scale_n = float(view.scale_denom)
     frame.annotations = bool(annotations)
     # A band at the top of the page carries the sheet's own title; the

@@ -227,3 +227,58 @@ def test_the_door_sheet_states_the_schedule_the_takeoff_bills():
     schemas = [t for t in sheet2.texts
                if t.list_name == "__schedule_openings__"]
     assert len(schemas) == 1, "sinh lại không được xếp thêm bảng thứ hai"
+
+
+def test_a_reissue_prints_the_new_cut_not_yesterdays():
+    """The storey rises; the sheet must show the cut at the new height.
+
+    Re-issuing reuses the frame (a second frame would double the drawing
+    on the page) — and that reuse is exactly where a stale cut hides: the
+    frame renders what its SCENE says, so the scene's rule has to be
+    rewritten with the model. This failed silently: the sheet kept the
+    old cut and nobody could see it until it was printed.
+    """
+    b = _house(1)
+    scene = Scene()
+    DS.generate_docset(scene, b)
+    plan = next(x for x in scene.saved_views if x.name == "Mặt bằng Tầng 1")
+    before = float(plan.target[2])
+    frames = sum(len(s.frames) for s in scene.compositions)
+
+    b.story(b.stories[0]["id"])["z_mm"] = 900.0
+    DS.generate_docset(scene, b)
+    again = next(x for x in scene.saved_views if x.name == "Mặt bằng Tầng 1")
+    assert float(again.target[2]) > before, "cao độ cắt phải đi theo tầng"
+    assert sum(len(s.frames) for s in scene.compositions) == frames, \
+        "sinh lại không được thêm khung"
+
+
+def test_inserting_a_storey_reissues_the_set_without_orphans():
+    """Sheet codes are POSITIONAL: inserting a storey renumbers everything
+    below it, so the previous issue's sheets would linger beside the new
+    set and the document would carry both drawings of the same floor."""
+    b = _house(2)
+    scene = Scene()
+    DS.generate_docset(scene, b)
+    first = len(scene.compositions)
+    b.stories.insert(1, {"id": "mid", "name": "Tầng 1.5", "z_mm": 1650.0,
+                         "height_mm": 1650.0})
+    result = DS.generate_docset(scene, b)
+    assert len(scene.compositions) == len(result.sheets), \
+        "không được để lại tờ của lần phát hành trước"
+    assert len(scene.compositions) > first
+    codes = [s.name.split(" ")[0] for s in scene.compositions]
+    assert len(set(codes)) == len(codes), f"mã tờ trùng: {codes}"
+
+
+def test_a_sheet_the_user_drew_by_hand_is_never_deleted():
+    """The generator owns its KT-coded set and nothing else."""
+    from core.composition import Composicion
+
+    b = _house(1)
+    scene = Scene()
+    DS.generate_docset(scene, b)
+    mine = Composicion(name="Bản vẽ tay")
+    scene.compositions.append(mine)
+    DS.generate_docset(scene, b)
+    assert mine in scene.compositions

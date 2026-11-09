@@ -991,7 +991,8 @@ def install_view_planes(scene, view: DrawingView) -> list:
 def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
                    x_mm: float | None = None, y_mm: float | None = None,
                    w_mm: float | None = None, h_mm: float | None = None,
-                   title: bool = True, style: str = "vectorial"):
+                   title: bool = True, style: str = "vectorial",
+                   replace=None):
     """Put a drawing on a sheet as a saved scene + a frame that shows it.
 
     The two halves are one operation because they are one thing: a FRAME
@@ -1013,6 +1014,21 @@ def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
     if existing is None:
         existing = SavedView.capture(scene_name, scene, viewpoint)
         scene.saved_views.append(existing)
+    else:
+        # A re-issued drawing keeps its NAME and takes the NEW rule: the
+        # camera, the distance, the cut and the trims are the drawing's,
+        # and the storey may have risen since the last issue. Reusing the
+        # old scene wholesale would reprint yesterday's cut with today's
+        # model behind it — the picture nobody checks until it is printed.
+        existing.target = (float(viewpoint.target.x()),
+                           float(viewpoint.target.y()),
+                           float(viewpoint.target.z()))
+        existing.distance = float(viewpoint.distance)
+        existing.yaw = float(viewpoint.yaw)
+        existing.pitch = float(viewpoint.pitch)
+        existing.fov_deg = float(viewpoint.fov_deg)
+        existing.perspective = bool(viewpoint.perspective)
+        existing.hidden_layers = []
     # The cut: a scene records which plane is active by uid, and the
     # capture above ran with whatever the VIEWPORT had on — so the
     # drawing's own cut is written in explicitly, or recalling the scene
@@ -1045,6 +1061,12 @@ def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
         frame.title_text = name or scene_name
         frame.title_style = "layout"
         frame.title_scale = True
+    if replace is not None:
+        # Re-issuing an existing sheet: the frame is already there, and
+        # only its rule is refreshed (the scene above). Appending a second
+        # frame would double the drawing on the page.
+        scene.version += 1
+        return replace
     sheet.frames.append(frame)
     scene.version += 1
     return frame
