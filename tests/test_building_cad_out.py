@@ -123,3 +123,48 @@ def test_an_empty_model_writes_an_empty_dxf_not_an_error(tmp_path):
     counts = dxf_bim.save_plan_dxf(path, scene, b, b.stories[0]["id"])
     assert path.exists()
     assert counts["lines"] == 0
+
+
+def test_the_plan_reads_back_as_the_layers_cad_expects(tmp_path):
+    """The round trip: export the plan, read the file again with ezdxf.
+
+    An office hands the DXF to another office, which opens it in its own
+    CAD — so the file must carry geometry on the layers the map names, not
+    only claim it in the count summary. Reading it back is the only check
+    that catches a writer that lies.
+    """
+    import ezdxf
+
+    from core.building.builder import build
+    from core.building.model import Building
+    from core.building.scene_sync import sync
+    from core.scene import Scene
+    from formats.dxf_bim import save_plan_dxf
+
+    b = Building()
+    g = b.add_story("Tầng 1", 0.0, 3300.0)
+    for end in ((6000.0, 0.0), (0.0, 4000.0)):
+        b.add_element("wall", g["id"], {
+            "baseline_start_mm": [0.0, 0.0], "baseline_end_mm": list(end),
+            "thickness_mm": 200.0, "height_mm": 3300.0})
+    for element in list(b.elements):
+        build(b, element)
+    scene = Scene()
+    sync(scene, b)
+
+    path = tmp_path / "mat-bang.dxf"
+    counts = save_plan_dxf(str(path), scene, b, str(g["id"]))
+    assert counts["lines"] > 0
+
+    doc = ezdxf.readfile(str(path))
+    msp = doc.modelspace()
+    kinds = {}
+    for entity in msp:
+        kinds[entity.dxftype()] = kinds.get(entity.dxftype(), 0) + 1
+    assert kinds.get("LINE", 0) == counts["lines"]
+    assert kinds.get("HATCH", 0) == counts["hatch"]
+    layers = {e.dxf.layer for e in msp}
+    assert "KT-CUT" in layers
+    assert "KT-HATCH" in layers
+    # The unit the office set is the unit the file declares.
+    assert int(doc.header.get("$INSUNITS", 0)) == 4          # millimetres
