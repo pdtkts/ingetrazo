@@ -199,3 +199,44 @@ def test_the_dxf_check_catches_a_rename_that_never_reached_the_file(
 
     assert any("KT-CUT" in p and "A-WALL" in p for p in report["problems"]), \
         report["problems"]
+
+
+# ---- Window ▸ Toolbars ---------------------------------------------------
+
+def test_every_toolbar_can_be_hidden_and_found_again(window):
+    """A bar that went missing was only recoverable by right-clicking the
+    empty space where it used to be — which a user who hid it cannot see.
+    The menu lists them all and says the way back."""
+    menu = window._toolbars_menu
+    window._fill_toolbars_menu(menu)
+    labels = {a.text() for a in menu.actions() if a.text()}
+    assert "BIM" in labels, labels
+    assert any("thanh công cụ" in label for label in labels), labels
+
+    bar = window.toolbars["bim"]
+    bar.setVisible(False)
+    assert bar.isHidden()
+    window._show_all_toolbars()
+    assert not bar.isHidden(), "thanh BIM không bật lại được"
+
+
+def test_the_toolbar_list_is_built_when_it_opens(window):
+    """Extensions add bars AFTER the menus are made, so a list frozen at
+    start-up would never show them — and those are exactly the bars a user
+    has no other way to turn off."""
+    menu = window._toolbars_menu
+    window._fill_toolbars_menu(menu)
+    before = {a.text() for a in menu.actions() if a.text()}
+
+    from PySide6.QtWidgets import QToolBar
+
+    extra = QToolBar("Thanh của tiện ích", window)
+    window.addToolBar(extra)
+    window.toolbars["plugin_demo"] = extra
+    window._fill_toolbars_menu(menu)
+    after = {a.text() for a in menu.actions() if a.text()}
+
+    assert "Thanh của tiện ích" in after - before
+    extra.setVisible(False)
+    window._show_all_toolbars()
+    assert not extra.isHidden()

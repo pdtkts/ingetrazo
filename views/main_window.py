@@ -1870,7 +1870,17 @@ class MainWindow(QMainWindow):
             lambda m=panels_menu: self._fill_panels_menu(m))
         window_menu.addMenu(panels_menu)
         self._panels_menu = panels_menu
-        # The same entry closes the right-click menu over a toolbar.
+
+        # Every toolbar, with its show/hide, in the menu as well as on the
+        # right-click over the bars themselves: a user whose Main bar went
+        # missing had no way back except by right-clicking empty toolbar
+        # space they could no longer see.
+        toolbars_menu = QMenu(tr("Toolbars"), window_menu)
+        toolbars_menu.aboutToShow.connect(
+            lambda m=toolbars_menu: self._fill_toolbars_menu(m))
+        window_menu.addMenu(toolbars_menu)
+        self._toolbars_menu = toolbars_menu
+
         self._act_reset_toolbars = window_menu.addAction(
             tr("Restore default toolbars"))
         self._act_reset_toolbars.setStatusTip(tr(_RESET_TOOLBARS_TIP))
@@ -2224,6 +2234,34 @@ class MainWindow(QMainWindow):
             [self.tray], [width], Qt.Horizontal))
         QTimer.singleShot(0, self, self._style_dock_tabs)
         QTimer.singleShot(0, self, self._place_sidebar_handle)
+
+    def _fill_toolbars_menu(self, menu) -> None:
+        """One checkable entry per toolbar, then the way back to factory.
+
+        Built when it opens, because extensions add their own bars after
+        the menus are made — a list frozen at start-up would never show
+        them, and the bars a plugin adds are exactly the ones a user
+        cannot find a way to turn off.
+        """
+        menu.clear()
+        for key, bar in sorted(self.toolbars.items()):
+            act = menu.addAction(bar.windowTitle() or key)
+            act.setStatusTip(tr("Hiện hoặc ẩn thanh công cụ này."))
+            act.setCheckable(True)
+            act.setChecked(not bar.isHidden())
+            act.toggled.connect(
+                lambda on, b=bar: b.setVisible(bool(on)))
+        menu.addSeparator()
+        every = menu.addAction(tr("Hiện tất cả thanh công cụ"))
+        every.setStatusTip(tr("Bật lại mọi thanh công cụ."))
+        every.triggered.connect(self._show_all_toolbars)
+
+    def _show_all_toolbars(self) -> None:
+        for bar in self.toolbars.values():
+            bar.setVisible(True)
+        # A plugin's own bars are not in ``toolbars``; the window owns them.
+        for bar in self.findChildren(QToolBar):
+            bar.setVisible(True)
 
     def _fill_panels_menu(self, menu) -> None:
         """One checkable entry per side-tray tab (Marco, 29-09: «cuando
