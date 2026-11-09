@@ -148,6 +148,12 @@ class Scene:
     # View ▸ Section Planes / Section Cuts toggles.
     section_planes: list = field(default_factory=list)
     show_section_planes: bool = True
+    #: Annotations the BIM drawings wrote, keyed by drawing (view name):
+    #: ``{key: [entities]}``. A drawing's dimensions and room stamps are
+    #: DERIVED data — re-issuing the set rebuilds them from the model, so
+    #: the previous run's are dropped instead of piling up. User-placed
+    #: annotations are never in here and are never touched.
+    bim_annotations: dict = field(default_factory=dict)
     #: View-only trimming planes (ClipOnly section planes) a DRAWING brings
     #: while it renders — a plan's floor limit. Never saved with the model
     #: and never the user's: the composer publishes them around a frame and

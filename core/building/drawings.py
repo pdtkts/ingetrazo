@@ -95,7 +95,8 @@ class DrawingView:
 
     __slots__ = ("kind", "name", "row", "story_id", "target", "distance",
                  "yaw", "pitch", "up", "fov_deg", "section_planes",
-                 "clip_planes", "crop_u", "crop_v", "scale_denom")
+                 "clip_planes", "crop_u", "crop_v", "scale_denom",
+                 "hidden_layers")
 
     def __init__(self, kind: str, name: str = "", row: dict | None = None,
                  story_id: str | None = None, target=(0.0, 0.0, 0.0),
@@ -121,6 +122,9 @@ class DrawingView:
         self.crop_u = crop_u
         self.crop_v = crop_v
         self.scale_denom = float(scale_denom)
+        #: Layers this drawing HIDES — the view filter. An empty list shows
+        #: everything; a layout names every trade but its own.
+        self.hidden_layers: list = []
 
     # ---- What the rest of the app consumes ----------------------------------
 
@@ -156,6 +160,7 @@ class DrawingView:
             "crop": (list(self.crop_u) + list(self.crop_v)
                      if self.crop_u and self.crop_v else None),
             "scale_denom": self.scale_denom,
+            "hidden_layers": list(self.hidden_layers),
         }
 
     @classmethod
@@ -163,7 +168,7 @@ class DrawingView:
         crop = raw.get("crop")
         yaw = raw.get("yaw")
         pitch = raw.get("pitch")
-        return cls(
+        view = cls(
             str(raw.get("kind") or KIND_STORY), str(raw.get("name") or ""),
             raw.get("row") or {}, raw.get("story_id"),
             raw.get("target") or (0.0, 0.0, 0.0),
@@ -176,6 +181,8 @@ class DrawingView:
             [SectionPlane.from_dict(r) for r in raw.get("clips") or []],
             crop[:2] if crop else None, crop[2:] if crop else None,
             float(raw.get("scale_denom") or 100.0))
+        view.hidden_layers = [str(n) for n in raw.get("hidden_layers") or ()]
+        return view
 
     def __repr__(self) -> str:  # pragma: no cover — debug aid
         return (f"DrawingView({self.kind} {self.name!r} "
@@ -339,7 +346,11 @@ def _directional_view(building, row, kind, name, scale_denom,
 
     story, z, top = _story_marks(building, row)
     height_mm = float(row.get("height_mm") or 0.0)
-    z0 = float(row.get("z_mm") or z)
+    z0 = float(row.get("z_mm") if row.get("z_mm") is not None else z)
+    # An elevation of the whole house states its own floor and height; the
+    # storey the row names only decides where the view is filed.
+    if row.get("z_mm") is not None or height_mm:
+        top = z0 + (height_mm or (top - z0))
     planes: list = []
     if kind in (KIND_SECTION, KIND_INTERIOR):
         # Cut away everything on the viewer's side of the line and look at
@@ -363,12 +374,12 @@ def _directional_view(building, row, kind, name, scale_denom,
                            (0.0, 0.0, z0 - INTERIOR_BELOW_MM)))
 
     mid = ((p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0)
-    x0, y0, x1, y1 = story_box(building, story)
-    tall = max(top - (z - 1000.0), (x1 - x0), (y1 - y0)) or 1000.0
+    tall = max(top - (min(z0, z) - 1000.0), 1000.0)
+    base = min(z0, z)
     view = DrawingView(
         kind, name, row, str(story["id"]),
         target=(mid[0] / 1000.0, mid[1] / 1000.0,
-                (z + tall / 2.0) / 1000.0),
+                (base + tall / 2.0) / 1000.0),
         yaw=0.0, pitch=0.0, up=(0.0, 0.0, 1.0),
         scale_denom=_scale(length or 1000.0, tall, scale_denom,
                            frame_h_mm),
@@ -493,13 +504,19 @@ def dimension_value(scene, value_m: float) -> str:
 
 def annotate_plan(scene, building, view: DrawingView, *, history=None,
                   dimensions=True, levels=True, rooms=True, scale_denom=None,
-                  offset=None):
+                  offset=None, key=None):
     """Write a plan's dimension chains, levels and room stamps.
 
     Every entity is added through ``history`` (pass the window's History,
     or wrap in a ``CompoundCommand``), so the whole drawing is ONE undo
-    step and the .igz carries it like any other annotation. Without a history the entities are appended directly
-    — what a headless test or a script wants. Returns the entities added.
+    step and the .igz carries it like any other annotation. Without a
+    history the entities are appended directly — what a headless test or a
+    script wants. Returns the entities added.
+
+    ``key`` names the drawing these annotations belong to. Passing one
+    makes the call REGENERABLE: whatever the previous run wrote under that
+    key is removed first, so re-issuing a revised model updates the
+    drawing instead of stacking a second set of dimensions on it.
 
     The chains stand where the trade puts them — 10 mm of paper for the
     openings' edges and 18 for the wall ends, OUTSIDE the house — measured
@@ -510,11 +527,16 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
     from core.history import AddDimensionCommand, AddTextLabelCommand
     from core.textlabel import TextLabel
 
+    if key:
+        _clear_annotations(scene, key)
+
     def add(command, entity, bucket):
         if history is not None:
             history.execute(command)
         else:
             bucket.append(entity)
+        if key:
+            scene.bim_annotations.setdefault(key, []).append(entity)
         added.append(entity)
 
     story = building.story(view.story_id) if view.story_id else None
@@ -589,6 +611,27 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
                 QVector3D(0.0, 0.0, 0.0), text, layer=ANNOT_LAYER)
             add(AddTextLabelCommand(label), label, scene.text_labels)
     return added
+
+
+def _clear_annotations(scene, key: str) -> list:
+    """Drop what a previous run of this drawing wrote — and only that.
+
+    A drawing's dimensions and stamps are DERIVED data. Left in place they
+    would be re-issued on top of themselves, so a revised model would show
+    two dimension chains disagreeing about the same wall. User-placed
+    annotations live outside this registry and are never touched.
+    """
+    registry = getattr(scene, "bim_annotations", None)
+    if registry is None:
+        return []
+    gone = list(registry.pop(key, ()))
+    for entity in gone:
+        if entity in scene.dimensions:
+            scene.dimensions.remove(entity)
+        if entity in scene.text_labels:
+            scene.text_labels.remove(entity)
+        scene.selection.discard(entity)
+    return gone
 
 
 def _wall_chains(building, walls) -> list:
@@ -698,6 +741,29 @@ def _place_clip_names(view: DrawingView) -> None:
             sp.name = f"{view.kind}:{i}"
 
 
+def install_view_planes(scene, view: DrawingView) -> list:
+    """Register a drawing's cutting planes in the scene, once each.
+
+    A frame renders through a saved scene, and a scene refers to its cut by
+    uid — so the plane has to BE in the model's list for the frame to find
+    it. That is also what the reference does with its per-storey planes:
+    the plan's cut belongs to the storey, not to the moment it was drawn.
+    Planes already present (same uid) are left alone. Returns what was
+    added, so a caller can take them away again.
+    """
+    added: list = []
+    known = {getattr(sp, "uid", None) for sp in
+             getattr(scene, "section_planes", None) or ()}
+    for sp in view.section_planes:
+        if getattr(sp, "uid", None) in known:
+            continue
+        if not sp.name:
+            sp.name = view.name or view.kind
+        scene.section_planes.append(sp)
+        added.append(sp)
+    return added
+
+
 def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
                    x_mm: float | None = None, y_mm: float | None = None,
                    w_mm: float | None = None, h_mm: float | None = None,
@@ -714,6 +780,7 @@ def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
     from core.saved_views import SavedView
 
     _place_clip_names(view)
+    install_view_planes(scene, view)
     scene_name = name or view.name or VIEW_LABELS.get(
         view.kind, view.kind)
     existing = next((sv for sv in scene.saved_views
@@ -721,10 +788,23 @@ def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
     viewpoint = view.camera()
     if existing is None:
         existing = SavedView.capture(scene_name, scene, viewpoint)
-        existing.drawing = view.to_dict()
         scene.saved_views.append(existing)
-    else:
-        existing.drawing = view.to_dict()
+    # The cut: a scene records which plane is active by uid, and the
+    # capture above ran with whatever the VIEWPORT had on — so the
+    # drawing's own cut is written in explicitly, or recalling the scene
+    # would switch the plan's +1200 cut off.
+    if view.section_planes:
+        existing.section = {
+            "active": view.section_planes[0].uid,
+            "planes_shown": bool(getattr(scene, "show_section_planes",
+                                         True)),
+            "cuts_shown": True}
+    # The view filter: a layout shows one trade, so its scene hides the
+    # other trades' layers. Recorded on the scene, which is what makes the
+    # frame independent of the live layer state.
+    if view.hidden_layers:
+        existing.hidden_layers = [str(n) for n in view.hidden_layers]
+    existing.drawing = view.to_dict()
 
     page_w, page_h = sheet.page_size_mm()
     margin = float(sheet.margin_mm)

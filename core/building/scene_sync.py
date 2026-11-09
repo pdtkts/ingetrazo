@@ -159,6 +159,11 @@ def sync(scene, building=None, element_ids=None, force: bool = False):
             scene.groups.append(group)
         group.mesh = mesh
         group.name = _group_name(element)
+        layer_name = element_layer(str(element.get("type")))
+        group.layer = layer_name
+        if scene.layer(layer_name) is None:
+            from core.layers import Layer
+            scene.layers.append(Layer(layer_name))
         group.ifc = {"class": schemas.IFC_CLASS_OF.get(
             str(element.get("type")), "IfcBuildingElementProxy"),
             "name": group.name}
@@ -183,6 +188,26 @@ def _group_name(element) -> str:
     label = params.get("name")
     kind = TR_NAMES.get(str(element.get("type")), str(element.get("type")))
     return f"{kind} {label}" if label else f"{kind} {str(element['id'])[-6:]}"
+
+
+#: Every BIM element layer belongs under one prefix, so the whole model's
+#: layers sit together in the panel and a view can hide them in one move.
+BIM_LAYER_PREFIX = "BIM "
+
+#: The layer every auto-annotation (dimensions, room stamps) lands on.
+ANNOT_LAYER = "KT-Ghi chú"
+
+
+def element_layer(kind: str) -> str:
+    """The layer a BIM element is filed under, by its type.
+
+    One layer per trade (tường, cửa, sàn…) is what makes a layout drawing
+    possible at all: it shows one trade and hides the rest, and a plan's
+    view filter picks what a reader may see. It is also how an office is
+    already used to working — the layer list is the model's own index.
+    """
+    label = TR_NAMES.get(str(kind))
+    return BIM_LAYER_PREFIX + (label or "Khác")
 
 
 #: Element type → the label the Browser and the drawings use. The English

@@ -806,7 +806,7 @@ def _merge_collinear(segs, world, kinds, tol: float, tags=None):
 def hlr_drawing(scene, camera, geometry=None, profiles: bool = True,
                 fills: bool = True, caps: bool = True,
                 hidden: bool = False, layers: bool = False,
-                clip_planes=None) -> HlrDrawing:
+                clip_planes=None, section=None) -> HlrDrawing:
     """The full line drawing of *scene* under *camera* (parallel): visible
     segments classified as edge / profile / cut, plus the section-cut
     rings to fill. :func:`hlr_view` is the segments-only view of this.
@@ -847,6 +847,10 @@ def hlr_drawing(scene, camera, geometry=None, profiles: bool = True,
     below the storey is gone from the sheet without a cut line to show for
     it (the reference's «mặt phẳng XEN»).
 
+    ``section`` — the cut to apply instead of the scene's active one, for a
+    drawing that carries its own (a plan at +1200 that is not the plane the
+    user happens to have switched on).
+
     `layers=True` tags every segment with the layer it is inked with
     (`HlrDrawing.layers`) — what a sheet needs to draw each layer with its
     own colour, line type and weight. It walks the model itself (the fast
@@ -862,9 +866,13 @@ def hlr_drawing(scene, camera, geometry=None, profiles: bool = True,
         tris, hard, soft, soft_n = geometry
     # Active section cut: the composer's sheets honour it — the
     # whole reason sections exist here (plans and cross-cuts on paper).
-    sp = (scene.active_section()
-          if getattr(scene, "show_section_cuts", True)
-          and hasattr(scene, "active_section") else None)
+    # ``section`` lets a DRAWING bring its own cut (a plan's +1200 plane
+    # need not be the one the user has active in the viewport); without it
+    # the scene's active cut is used, exactly as the viewport shows it.
+    sp = section if section is not None else (
+        scene.active_section()
+        if getattr(scene, "show_section_cuts", True)
+        and hasattr(scene, "active_section") else None)
     # The scene's own cut comes first (it draws the chords); the extra
     # planes a view brings (a plan's floor limit) then trim whatever is
     # left, quietly — they hide and never cut.
@@ -1227,9 +1235,13 @@ def hlr_perspective(scene, camera, geometry=None) -> np.ndarray:
         tris, hard, soft = collect_geometry(scene)
     else:
         tris, hard, soft, soft_n = geometry
-    sp = (scene.active_section()
-          if getattr(scene, "show_section_cuts", True)
-          and hasattr(scene, "active_section") else None)
+    # ``section`` lets a DRAWING bring its own cut (a plan's +1200 plane
+    # need not be the one the user has active in the viewport); without it
+    # the scene's active cut is used, exactly as the viewport shows it.
+    sp = section if section is not None else (
+        scene.active_section()
+        if getattr(scene, "show_section_cuts", True)
+        and hasattr(scene, "active_section") else None)
     cut: list = []
     if sp is not None:
         if soft_n is not None:

@@ -197,6 +197,70 @@ def ensure_sheets(scene, building, project=None, story_ids=None,
     return made
 
 
+def sheet_index_text(sheets, project: dict | None = None) -> str:
+    """The sheet list a drawing set is issued with (``index`` sheet).
+
+    One line per sheet, in issue order, with its code and its title — the
+    list the office checks a set against before it leaves the door.
+    """
+    project = dict(project or {})
+    lines = [str(project.get("name") or "CÔNG TRÌNH"), ""]
+    lines.append("BẢNG LIỆT KÊ BẢN VẼ")
+    lines.append("")
+    for sheet in sheets:
+        name = str(getattr(sheet, "name", "") or "")
+        code, _, title = name.partition(" ")
+        lines.append(f"{code:<10}{title}")
+    return "\n".join(lines)
+
+
+def fill_sheet(sheet, view, scene, *, name: str = "", annotations: bool = True,
+               building=None, area=None):
+    """Fill a sheet with one drawing: its frame, and the sheet's own text.
+
+    The composition is deliberate — the drawing in the middle, its title
+    under it, and a scale bar where the title block does not claim the
+    corner — so an office sheet comes out of one call rather than a session
+    of dragging items around. Re-issuing the SAME sheet fills it again in
+    place: an existing frame bound to this drawing's scene is reused, not
+    duplicated.
+    """
+    from core.building import drawings as _drawings
+
+    scene_name = str(name or view.name or _drawings.VIEW_LABELS.get(
+        view.kind, view.kind))
+    frame = next((f for f in sheet.frames
+                  if str(getattr(f, "view_key", "")) == f"scene:{scene_name}"),
+                 None)
+    if frame is None:
+        frame = _drawings.place_on_sheet(sheet, view, scene, name=scene_name)
+    else:
+        frame.scale_n = float(view.scale_denom)
+    frame.annotations = bool(annotations)
+    # A band at the top of the page carries the sheet's own title; the
+    # frame's title line says the view (what a reader looks for first).
+    page_w, _page_h = sheet.page_size_mm()
+    margin = float(sheet.margin_mm)
+    head = next((t for t in sheet.texts
+                 if t.list_name == f"__title__{scene_name}"), None)
+    if head is None:
+        from core.composition import TextoItem
+        head = TextoItem(x_mm=margin, y_mm=margin, w_mm=page_w - 2 * margin,
+                         text="", size_pt=18.0, bold=True, align="left",
+                         list_name=f"__title__{scene_name}")
+        sheet.texts.append(head)
+    head.text = scene_name
+    head.y_mm = margin
+    if area is not None:
+        area.clear()
+    if building is not None and bool(annotations):
+        # The key is the drawing's name: re-issuing this sheet REPLACES what
+        # the previous run wrote instead of stacking a second set on it.
+        _drawings.annotate_plan(scene, building, view, key=scene_name)
+    scene.version += 1
+    return frame
+
+
 def export_sheets_pdf(window, path: str, sheets=None) -> list:
     """Write the sheets to one PDF, a page per sheet — the issued set.
 
