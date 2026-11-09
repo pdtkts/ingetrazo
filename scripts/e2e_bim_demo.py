@@ -437,7 +437,10 @@ def main(argv=None) -> int:
             plan.select(wall_id)
             plan.drag_element(wall_id, (3500.0, 100.0), (3000.0, 0.0), "body")
             plan.finish_drag(wall_id, (3000.0, 0.0), "body")
-            moved = (wbuilding.element(wall_id) or {}).get("params") or {}
+            # Ask again: a drag is a history step, and the cache is dropped
+            # each step, so the Building read before it is yesterday's.
+            moved = (building_of(wscene).element(wall_id)
+                     or {}).get("params") or {}
             where = moved.get("baseline_start_mm")
             segs = plan.build_drawing()[0]
             step("plan", f"kéo tường trên Plan → start={where}, "
