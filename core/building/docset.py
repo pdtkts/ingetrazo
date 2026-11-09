@@ -180,11 +180,16 @@ def generate_docset(scene, building, project=None, story_ids=None,
         if story is None:
             continue
         story_name = str(story.get("name") or sid)
-        for key, label_extra, cut, trim in (
+        # Each of the storey's sheets is the SAME cut showing one thing:
+        # ``show`` is the trade's own layer, kept on while the others are
+        # hidden. A wall plan with the furniture drawn on it is a drawing
+        # nobody can read, and a floor plan that also shows the beams is
+        # not a floor plan.
+        for key, label_extra, show, cut in (
                 ("plan", "Mặt bằng", None, None),
-                ("wall", "Mặt bằng tường", None, None),
-                ("floor", "Mặt bằng lát sàn", None, None),
-                ("ceiling", "Mặt bằng trần", None, None)):
+                ("wall", "Mặt bằng tường", "wall", None),
+                ("floor", "Mặt bằng lát sàn", "slab", None),
+                ("ceiling", "Mặt bằng trần", "ceiling", 0.0)):
             sheet = next((s for s in made
                           if _sheets_code_group(s) == key
                           and story_name in str(s.name)), None)
@@ -194,9 +199,9 @@ def generate_docset(scene, building, project=None, story_ids=None,
                    "name": f"{label_extra} {story_name}"}
             if cut is not None:
                 row["cut_mm"] = cut
-            if trim is not None:
-                row["cut_bottom_mm"] = trim
             view = _drawings.view_for(building, row)
+            if show is not None:
+                view.hidden_layers = _layers_except(show)
             # Only the main plan carries the drawing's language: the wall,
             # floor and ceiling plans are the same cut showing other
             # things, and annotating all four would print four room stamps

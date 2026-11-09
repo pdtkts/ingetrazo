@@ -225,7 +225,10 @@ TR_NAMES = {
     "wall": "Wall", "door": "Door", "window": "Window",
     "curtain_wall": "Curtain wall", "slab": "Slab", "ceiling": "Ceiling",
     "column": "Column", "beam": "Beam", "roof": "Roof", "stair": "Stair",
-    "zone": "Zone", "fixture": "Fixture", "custom": "BIM block",
+    "zone": "Zone", "fixture": "Fixture",
+    # NOT "BIM block": the layer prefix already says BIM, and the label is
+    # what ``element_layer`` concatenates with it.
+    "custom": "Block",
 }
 
 
