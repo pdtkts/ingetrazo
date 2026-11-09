@@ -566,3 +566,229 @@ def test_the_step_diff_takes_its_host_from_either_side():
     removed = C.changed_ids_between(after, before)
     assert str(door["id"]) in removed and str(wall["id"]) in removed, \
         "xoá cửa mà không dựng lại tường chủ"
+
+
+# ---- Review 5 -----------------------------------------------------------------
+
+def test_an_opening_follows_the_wall_that_hosts_it():
+    """A door's whole world position is derived from its host wall, and
+    NONE of those inputs are the door's own parameters. Without them the
+    opening's signature was identical after its host moved, the sync
+    skipped it, and the leaf stayed where it was — floating outside its own
+    opening in the 3D view, the plan DXF and the IFC, until a forced
+    rebuild. It fires on every entry point, because they all call sync()
+    without force."""
+    from core.building import commands as C
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.building.scene_sync import group_for, sync
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    S.build_sample(History(scene), scene, "townhouse")
+    building = building_of(scene)
+    wall = next(e for e in building.elements if e.get("type") == "wall")
+    door = next(e for e in building.elements
+                if e.get("type") == "door"
+                and str((e.get("params") or {}).get("host_wall_id"))
+                == str(wall["id"]))
+
+    def bounds(element_id):
+        mesh = group_for(scene, element_id).mesh
+        ys = [float(v.position.y()) for v in mesh.vertices]
+        xs = [float(v.position.x()) for v in mesh.vertices]
+        return (round(min(xs), 4), round(max(xs), 4),
+                round(min(ys), 4), round(max(ys), 4))
+
+    wall_before, door_before = bounds(wall["id"]), bounds(door["id"])
+    p0 = list(wall["params"]["baseline_start_mm"])
+    p1 = list(wall["params"]["baseline_end_mm"])
+    command = C.set_params(str(wall["id"]), {
+        "baseline_start_mm": [p0[0], p0[1] + 1000.0],
+        "baseline_end_mm": [p1[0], p1[1] + 1000.0]})
+    command._rebuild = lambda s, b: sync(s, b)
+    History(scene) if False else None
+    # the scene's own history, so undo can be asserted below
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    win.viewport.scene.groups[:] = []
+    win.hide()
+    del win
+
+    scene2 = Scene()
+    history = History(scene2)
+    S.build_sample(history, scene2, "townhouse")
+    building2 = building_of(scene2)
+    wall2 = next(e for e in building2.elements if e.get("type") == "wall")
+    door2 = next(e for e in building2.elements
+                 if e.get("type") == "door"
+                 and str((e.get("params") or {}).get("host_wall_id"))
+                 == str(wall2["id"]))
+
+    def bounds2(element_id):
+        mesh = group_for(scene2, element_id).mesh
+        ys = [float(v.position.y()) for v in mesh.vertices]
+        return round(min(ys), 3), round(max(ys), 3)
+
+    door_before2 = bounds2(door2["id"])
+    q0 = list(wall2["params"]["baseline_start_mm"])
+    q1 = list(wall2["params"]["baseline_end_mm"])
+    move = C.set_params(str(wall2["id"]), {
+        "baseline_start_mm": [q0[0], q0[1] + 1000.0],
+        "baseline_end_mm": [q1[0], q1[1] + 1000.0]})
+    move._rebuild = lambda s, b: sync(s, b)
+    history.execute(move)
+    door_after = bounds2(door2["id"])
+    assert abs(door_after[0] - door_before2[0] - 1.0) < 0.01, \
+        f"cửa không đi theo tường chủ: {door_before2} → {door_after}"
+    history.undo()
+    assert bounds2(door2["id"]) == door_before2, "Ctrl+Z không trả cửa về"
+    assert wall_before and door_before       # the first scene was a baseline
+
+
+def test_undoing_a_wall_removal_repairs_its_neighbours():
+    """The removed branch of the step diff added bare ids, so the walls a
+    deleted wall mitred against kept last revision's corner after Ctrl+Z —
+    the picture and the DXF disagreeing with the model. Undo of a removal
+    is the common case, not a corner."""
+    from core.building import commands as C
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    history = History(scene)
+    S.build_sample(history, scene, "townhouse")
+    building = building_of(scene)
+    walls = [e for e in building.elements if e.get("type") == "wall"]
+    victim = str(walls[0]["id"])
+    storey_id = str(walls[0]["story_id"])
+
+    before = building.to_dict()
+    history.execute(C.remove_element(victim))
+    # Both payloads are REAL: the after side is the model as it stands once
+    # the removal has run, which is exactly what a step records.
+    after = building_of(scene).to_dict()
+
+    # The undo direction: the step that puts the wall BACK.
+    added = C.changed_ids_between(after, before)
+    assert victim in added, added
+    neighbours = [str(w["id"]) for w in building_of(scene).elements
+                  if w.get("type") == "wall"
+                  and str(w.get("story_id")) == storey_id]
+    assert neighbours, "mẫu nhà phải còn tường cùng tầng"
+    missing = [n for n in neighbours if n not in added]
+    assert not missing, f"tường lân cận không được dựng lại: {missing}"
+
+
+def test_exporting_a_plan_twice_does_not_double_the_sheet():
+    """The export filed its annotations under a private «dxf:<storey>» key
+    BESIDE the drawing set's, and the composer draws every dimension its
+    frame can see — so one menu export turned a 14-chain sheet into 28, and
+    it survived save/reopen."""
+    from core.building import docset as _docset
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.scene import Scene
+    from core.history import History
+    from formats.dxf_bim import resolve_annotation_key
+
+    scene = Scene()
+    S.build_sample(History(scene), scene, "townhouse")
+    building = building_of(scene)
+    _docset.generate_docset(scene, building, annotations=True)
+    building = building_of(scene)
+    printed = len(scene.dimensions)
+    assert printed > 0
+
+    from core.building import drawings as _drawings
+
+    story = building.stories[0]
+    for _ in range(2):
+        view = _drawings.view_for(building, {"kind": "story",
+                                             "story_id": str(story["id"])})
+        key = resolve_annotation_key(scene, view)
+        assert key in scene.bim_annotations, key
+        assert not key.startswith("dxf:"), \
+            "xuất DXF lại mở khoá riêng bên cạnh khoá của bộ tờ"
+        view.annotation_key = key
+        _drawings.annotate_plan(scene, building, view, key=key)
+    assert len(scene.dimensions) == printed, \
+        f"{printed} → {len(scene.dimensions)} kích thước sau khi xuất"
+
+
+def test_a_storey_never_answers_for_another_stores_key():
+    """«Tầng» is the first word of «Mặt bằng Tầng 1», so a word-set match
+    printed the floor above's level marks on a storey whose own floor is
+    ±0.000. The key must END with the storey's own name."""
+    from core.building import drawings as _drawings
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.history import History
+    from core.scene import Scene
+    from formats.dxf_bim import _drawing_key
+
+    scene = Scene()
+    S.build_sample(History(scene), scene, "townhouse")
+    building = building_of(scene)
+    scene.bim_annotations = {
+        "Mặt bằng Tầng 1": [],
+        "Mặt bằng Tầng 11": [],
+    }
+    first = building.stories[0]
+    first["name"] = "Tầng 1"
+    view = _drawings.view_for(building, {"kind": "story",
+                                        "story_id": str(first["id"])})
+    assert _drawing_key(scene, view) == "Mặt bằng Tầng 1"
+
+    # A storey whose WHOLE name is a prefix of another's must not answer
+    # for it: «Tầng» beside «Tầng 1».
+    first["name"] = "Tầng"
+    assert _drawing_key(scene, view) is None, \
+        "tầng «Tầng» nhận nhầm khoá của «Mặt bằng Tầng 1»"
+
+
+def test_the_crop_tool_survives_a_document_with_no_storey():
+    """Every other draft tool says «chưa có tầng nào» on an empty model;
+    the crop let view_for raise out of the click handler, where the
+    History never sees it, and the user got a Qt traceback."""
+    from core.scene import Scene
+    from views.draft_tools import CropTool
+
+    class _Plan:
+        _scene = Scene()
+        _story_id = ""
+        _building = None
+        _view_row: dict = {}
+
+        def __init__(self):
+            self.said: list = []
+
+        def _say(self, text):
+            self.said.append(str(text))
+
+    plan = _Plan()
+    tool = CropTool(plan)
+    tool.points = [(0.0, 0.0), (2000.0, 2000.0)]
+    tool.commit()                                   # must not raise
+    assert plan.said and "tầng" in plan.said[-1].lower(), plan.said
+
+
+def test_the_lens_goes_down_with_the_plan():
+    """The lens is a Qt.Tool: Qt does not hide it with its parent, so a
+    closed plan left a frameless lens floating over the desktop."""
+    from core.building import samples as S
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    S.build_sample(win.viewport.history, win.viewport.scene, "townhouse")
+    win._on_open_plan_window()
+    plan = win._plan_window
+    plan.toggle_magnifier(True)
+    assert plan._lens.isVisible()
+    plan.hide()
+    assert not plan._lens.isVisible(), "kính lúp còn nổi sau khi đóng Plan"
+    win.hide()

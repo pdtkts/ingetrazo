@@ -310,6 +310,14 @@ class CropTool(DraftTool):
             return
         scene = self.plan._scene
         building = building_of(scene)
+        # The crop is a view OF a storey, so there has to be one: without
+        # this guard `view_for` raises out of the click handler — which the
+        # History never sees — and the user gets a Qt traceback instead of
+        # a sentence. Every other draft tool survives an empty model.
+        if not building.stories or not self.plan._story_id:
+            self.points = []
+            self.plan._say(tr("Chưa có tầng nào — dựng tầng trước đã."))
+            return
         row = {"kind": "detail", "story_id": self.plan._story_id,
                "name": tr("Vùng hiển thị"),
                "rect_mm": [u0, v0, u1, v1]}
@@ -317,11 +325,9 @@ class CropTool(DraftTool):
         # ISSUABLE: the docset reads rows, so a crop nobody can issue
         # would be a rectangle drawn on a screen.
         def mutate(b) -> None:
-            b.view_rows.append(row) if hasattr(b, "view_rows") else None
             settings = b.settings.setdefault("drawings", [])
             settings.append(row)
 
-        _, source_row = self.plan._view_row, None
         source_row = {"kind": "story", "story_id": self.plan._story_id}
         view = _drawings.view_for(building, source_row)
         detail = _drawings.detail_view(building, row, view)

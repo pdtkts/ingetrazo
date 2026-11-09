@@ -224,7 +224,19 @@ def changed_ids_between(before_payload, after_payload):
                            for other in now.values()
                            if str(other.get("story_id"))
                            == str(row.get("story_id")))
-    ids.update(str(eid) for eid in was if eid not in now)   # removed
+    # Removed elements — and the walls they mitred against. This branch is
+    # exactly the UNDO of a removal, so it is the common case and not a
+    # corner: deleting a wall and pressing Ctrl+Z used to leave its
+    # neighbours at last revision's corner while the model said otherwise.
+    # The type is read from the BEFORE row, the only side that still has it.
+    for eid, row in was.items():
+        if eid not in now:
+            ids.add(str(eid))
+            if str(row.get("type")) == "wall":
+                ids.update(str(other.get("id"))
+                           for other in now.values()
+                           if str(other.get("story_id"))
+                           == str(row.get("story_id")))
     if stories_moved:
         ids.update(now)
     # An opening's geometry is its HOST wall's business: a door that was
@@ -299,7 +311,19 @@ def changed_element_ids(before_payload, building):
                            for other in building.elements
                            if str(other.get("story_id"))
                            == str(element.get("story_id")))
-    ids.update(was)                             # removed elements
+    # Removed elements, and the walls they mitred against. This branch is
+    # exactly the UNDO of a removal, so it is the common case and not the
+    # corner: deleting a wall and pressing Ctrl+Z used to leave every
+    # neighbour at last revision's corner — the picture and the DXF
+    # disagreeing with the model, with no further edit to reveal it. The
+    # type is read from the BEFORE row, since the model no longer has it.
+    for eid, row in was.items():
+        ids.add(str(eid))
+        if str(row.get("type")) == "wall":
+            ids.update(str(other.get("id"))
+                       for other in building.elements
+                       if str(other.get("story_id"))
+                       == str(row.get("story_id")))
     if story_changed:
         ids.update(str(e.get("id")) for e in building.elements)
     for element in building.elements:

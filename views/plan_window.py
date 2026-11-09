@@ -80,8 +80,8 @@ COMMAND_TOOLS = {
     "wall": "wall", "curtain_wall": "curtain_wall", "column": "column",
     "beam": "beam", "slab": "slab", "ceiling": "ceiling", "roof": "roof",
     "door": "door", "window": "window", "zone": "zone",
-    "fixture": "fixture", "section": "section", "text": "text",
-    "dim": "dimension", "pushpull": "pushpull", "paint": "paint",
+    "fixture": "fixture", "section": "section",
+    "pushpull": "pushpull", "paint": "paint",
 }
 
 
@@ -710,6 +710,23 @@ class PlanWindow(QDialog):
                   % (self.story_box.currentText(),
                      int(_drawings.DEFAULT_CUT_MM),
                      int(self._view.scale_denom)))
+
+    # ---- the window's own life ------------------------------------------
+    def hideEvent(self, event) -> None:                    # noqa: N802
+        """Take the lens down with the plan.
+
+        The lens is a Qt.Tool parented to this window, but a tool window is
+        NOT hidden when its parent is: close the plan with the lens on and
+        a frameless square kept floating over the desktop with no plan
+        under it — and it was still there, in the «on» state, when the plan
+        was opened again.
+        """
+        self.toggle_magnifier(False)
+        super().hideEvent(event)
+
+    def closeEvent(self, event) -> None:                   # noqa: N802
+        self.toggle_magnifier(False)
+        super().closeEvent(event)
 
     # ---- the magnifier --------------------------------------------------
     def toggle_magnifier(self, on: bool | None = None) -> None:

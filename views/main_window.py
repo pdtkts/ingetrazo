@@ -3697,7 +3697,16 @@ class MainWindow(QMainWindow):
         # The file carries THIS storey's annotations and nobody else's: the
         # document holds every storey's at once, and an export that wrote
         # them all would print the floor above's levels on this plan.
-        view.annotation_key = f"dxf:{story['id']}"
+        #
+        # The key is the one a drawing SET has already filed this storey
+        # under, when there is one. Minting a private ``dxf:<storey>`` key
+        # beside the set's left BOTH sets of dimensions in the document,
+        # and the composer draws every dimension its frame can see — so one
+        # menu export turned the ground-floor sheet from 14 chains into 28,
+        # each geometry twice, and it survived save/reopen.
+        from formats.dxf_bim import resolve_annotation_key
+
+        view.annotation_key = resolve_annotation_key(scene, view)
         _drawings.annotate_plan(scene, building, view,
                                 key=view.annotation_key)
         from core.building import pens as _pens

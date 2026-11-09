@@ -385,6 +385,21 @@ def _owned(scene, view):
     return {id(e) for e in registry.get(key, ())}
 
 
+def resolve_annotation_key(scene, view) -> str:
+    """The key a caller should FILE this drawing's annotations under.
+
+    A drawing SET has already published each storey under its sheet's own
+    name; an export that minted a private key beside that one left BOTH
+    sets in the document, and the composer draws every dimension its frame
+    can see — so one export doubled the sheet's chains. When the set's key
+    exists, it is reused and the annotations are REPLACED, not added.
+    """
+    found = _drawing_key(scene, view)
+    if found:
+        return str(found)
+    return f"dxf:{getattr(view, 'story_id', '') or view.name}"
+
+
 def _drawing_key(scene, view):
     """The registry key this drawing's annotations were filed under.
 
@@ -426,15 +441,23 @@ def _drawing_key(scene, view):
             row = building.story(story) or {}
             story_name = str(row.get("name") or "")
         if story_name:
-            # A sheet names its drawing «Mặt bằng <storey>», and the
-            # registry key is that whole name: the match is by the
-            # storey's own name as a whole word, never a substring, so
-            # «Tầng 1» cannot answer for «Tầng 11».
-            for key in registry:
-                parts = str(key).replace("—", " ").split()
-                if story_name.split() and \
-                        all(word in parts for word in story_name.split()):
-                    return str(key)
+            # A sheet names its drawing «Mặt bằng <storey>» and the
+            # registry key is that whole name. The match is the storey's
+            # name against the key with the drawing's KIND words taken off
+            # the front: accepting «every word of the storey appears
+            # somewhere in the key» matched «Tầng» against «Mặt bằng Tầng
+            # 1» and printed the floor above's level marks on a plan whose
+            # own floor is ±0.000. Trailing words of the key that the
+            # storey does not have mean it is a DIFFERENT drawing.
+            words = story_name.split()
+            for candidate in sorted(registry, key=lambda k: len(str(k))):
+                parts = str(candidate).replace("—", " ").split()
+                if not words or len(parts) < len(words):
+                    continue
+                # Strip the key's leading kind words («Mặt bằng», «Plan»)
+                # then require the REST to be the storey's own name.
+                if parts[-len(words):] == words:
+                    return str(candidate)
     return None
 
 

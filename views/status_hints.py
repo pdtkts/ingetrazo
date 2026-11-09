@@ -70,6 +70,13 @@ HINTS: dict = {
     "window": ("Click the wall the window goes in.",
                "Click where it sits along the wall, or type the distance."),
     "fixture": "Click the fixture's centre.",
+    "stair": ("Click the start of the stair's centre line.",
+              "Click the end; the treads are solved between the two, and "
+              "the riser count is reported while you draw."),
+    # Ống hút / Ống nhả: the Paint tool's gesture, for the properties.
+    "pick": "Click a building element to take its parameters.",
+    "inject": ("Click the element to apply them to, or click away to "
+               "apply them to the whole selection."),
     "slab": ("Drag a rectangle, or Ctrl = pick the room's boundary.",
              "Drag the rectangle, or click the room's inside."),
     "ceiling": ("Drag a rectangle, or Ctrl = pick the room's boundary.",

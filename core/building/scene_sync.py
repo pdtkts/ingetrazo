@@ -28,6 +28,53 @@ from core.group import Group
 EXT_KEY = "building"
 
 
+def _host_inputs(building, element) -> tuple:
+    """What an OPENING's geometry takes from its host wall.
+
+    A door's whole world position is derived from the wall it pierces: the
+    baseline's two ends, which side of the centreline its frame sits on
+    (``side_offsets``, which reads the thickness), the height its sill
+    rides at (``base_z``) and the wall's own height. None of those are the
+    opening's parameters, so a signature built from the opening alone was
+    IDENTICAL after its host moved — the sync skipped it, the wall's hole
+    moved, and the door leaf stayed where it was: floating outside its own
+    opening in the 3D view, the plan DXF and the IFC, on every entry point
+    (they all call ``sync`` without ``force``).
+
+    Read from the same functions ``extras._host_frame`` reads, so the two
+    cannot drift: a field added there must be added here or the signature
+    stops covering the geometry it guards.
+    """
+    from core.building import builder as core_builder
+    from core.building import extras as _extras
+    from core.building import planar
+
+    params = element.get("params") or {}
+    host_id = str(params.get("host_wall_id") or "")
+    host = building.element(host_id) if host_id else None
+    if host is None:
+        # No host: the opening builds nothing, and its own params are the
+        # whole story (the builder reports the failure through the scene's
+        # own error list).
+        return (str(host_id),)
+    hparams = host.get("params") or {}
+    story = _extras.story_of(building, host)
+    try:
+        joins = (core_builder.joins_for_story(building, str(story["id"]))
+                 if story is not None else None)
+    except Exception:                              # noqa: BLE001 — optional
+        joins = None
+    entry = (joins or {}).get(host_id) or {}
+    return (
+        str(host_id),
+        _freeze(hparams),
+        float(_extras.base_z(building, hparams, story) or 0.0),
+        float(_extras.effective_height(building, hparams, story) or 0.0),
+        _freeze(list(planar.side_offsets(hparams))),
+        _freeze([entry.get("start"), entry.get("end")]),
+    )
+
+
 def _signature(building, element) -> tuple:
     """What an element's geometry depends on — the rebuild trigger."""
     story = building.story(str(element.get("story_id") or ""))
@@ -55,6 +102,10 @@ def _signature(building, element) -> tuple:
         from core.building.builder import _joins_fingerprint
 
         neighbours = _joins_fingerprint(building, str(story["id"]))
+    host = ()
+    if element.get("type") in schemas.OPENING_TYPES:
+        # An opening's geometry is its HOST's geometry: see _host_inputs.
+        host = _host_inputs(building, element)
     return (
         str(element.get("type")),
         _freeze(params),
@@ -62,6 +113,7 @@ def _signature(building, element) -> tuple:
         float((above or {}).get("z_mm", -1.0)),
         children,
         neighbours,
+        host,
     )
 
 

@@ -18,8 +18,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                               QScrollArea, QTreeWidget, QTreeWidgetItem,
-                               QVBoxLayout, QWidget)
+                               QScrollArea, QTabWidget, QTreeWidget,
+                               QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from core.building import commands as bim_commands
 from core.building import elements as schemas
@@ -68,20 +68,48 @@ class BuildingPanel(QWidget):
         self.element_tree.itemSelectionChanged.connect(self._on_element_pick)
         lay.addWidget(self.element_tree)
 
-        self.form_host = QWidget()
-        self.form = QFormLayout(self.form_host)
-        self.form.setContentsMargins(0, 4, 0, 4)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.form_host)
-        scroll.setMinimumHeight(120)
-        lay.addWidget(scroll, 1)
+        # The parameters, in the three tabs the trade reads them in:
+        # what the element IS (its type and name), what it is MADE of,
+        # and how it is SHAPED. One flat list of twenty fields made a
+        # user scroll past the width to reach the thickness.
+        self.tabs = QTabWidget()
+        self._forms: dict = {}
+        for key, label in (("element", tr("Cấu kiện")),
+                           ("material", tr("Vật liệu")),
+                           ("shape", tr("Tạo hình"))):
+            host = QWidget()
+            form = QFormLayout(host)
+            form.setContentsMargins(0, 4, 0, 4)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(host)
+            self.tabs.addTab(scroll, label)
+            self._forms[key] = form
+        self.tabs.setMinimumHeight(150)
+        lay.addWidget(self.tabs, 1)
+        # Kept as an alias: the element tab is what «the form» means when
+        # anything outside this panel reaches for it.
+        self.form = self._forms["element"]
+        self.form_host = self.form.parentWidget()
 
         # What the last synchronisation could not build. An element that
         # fails (a door whose host wall was deleted, a wall with no
         # baseline) simply does not appear in a parametric tool, and a
         # silent absence is the worst thing it can do — so the panel says
         # it, in the same place the user is already looking.
+        # Applying the same change to every element of the kind on the
+        # storey — the office's own gesture («cả tầng này dày 220»), and
+        # one undo step whatever it touches.
+        bulk_row = QHBoxLayout()
+        self._bulk = QPushButton(tr("Áp cho cả tầng này…"))
+        self._bulk.setToolTip(tr(
+            "Lấy thông số đang sửa của cấu kiện này và áp cho MỌI cấu kiện "
+            "cùng loại trên tầng đang vẽ — một bước hoàn tác."))
+        self._bulk.clicked.connect(self._on_bulk_apply)
+        bulk_row.addWidget(self._bulk)
+        bulk_row.addStretch(1)
+        lay.addLayout(bulk_row)
+
         self.warnings = QLabel("")
         self.warnings.setWordWrap(True)
         self.warnings.setProperty("role", "error")
@@ -181,11 +209,13 @@ class BuildingPanel(QWidget):
             self.element_tree.setCurrentItem(target)
 
     def _fill_fields(self) -> None:
-        """Build the form from the selected element's own schema."""
-        while self.form.rowCount():
-            self.form.removeRow(0)
+        """Build the three forms from the selected element's own schema."""
+        for form in self._forms.values():
+            while form.rowCount():
+                form.removeRow(0)
         self._fields = {}
         element = self._current_element()
+        self._bulk.setEnabled(element is not None)
         if element is None:
             self.hint.setText(tr("Select an element to edit its parameters."))
             return
@@ -202,9 +232,25 @@ class BuildingPanel(QWidget):
             if widget is None:
                 continue
             self._fields[key] = widget
-            self.form.addRow(_field_label(key), widget)
+            self._forms[_tab_for(key)].addRow(_field_label(key), widget)
+        self._sync_material_name(element)
         self.hint.setText(tr("Edits apply to the whole model: geometry, "
                              "drawings and quantities update together."))
+
+    def _sync_material_name(self, element) -> None:
+        """The material tab states WHICH material the id names: an id like
+        «gach_nhe» is not a word an office reads off a drawing."""
+        material_id = str((element.get("params") or {}).get(
+            "building_material_id") or "")
+        if not material_id:
+            return
+        record = schemas.material(material_id)
+        label = QLabel(tr("Vật liệu theo mã «%s»: %s (ưu tiên nối %s)")
+                       % (material_id, tr(str(record.get("name") or "")),
+                          int(record.get("priority", 0))))
+        label.setWordWrap(True)
+        label.setProperty("role", "muted")
+        self._forms["material"].addRow(label)
 
     def _widget_for(self, key: str, value):
         if isinstance(value, bool):
@@ -228,6 +274,62 @@ class BuildingPanel(QWidget):
             return spin
         return None                        # lists (outlines, panels) are
         # drawn with the tools, not typed in a form.
+
+    def _on_bulk_apply(self) -> None:
+        """Apply THIS element's current parameters to every same-kind
+        element on the storey, as one undo step.
+
+        The office's own gesture: «cả tầng này tường dày 220». Sent through
+        the panel's own read path, so what is applied is what the form
+        shows — never a schema default the user never saw.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        from core.history import CompoundCommand
+
+        element = self._current_element()
+        if element is None:
+            return
+        kind = str(element.get("type"))
+        story_id = str(element.get("story_id"))
+        building = self._building()
+        # The element being edited is INCLUDED: the button says «cả tầng
+        # này», and a user who types 220 into the thickness and presses it
+        # means 220 everywhere — including the element whose form they just
+        # typed in, which has not been committed by tabbing away.
+        targets = [e for e in building.on_story(story_id)
+                   if str(e.get("type")) == kind]
+        if len(targets) < 2:
+            self.hint.setText(tr(
+                "Tầng này không có cấu kiện «%s» nào khác.") % _type_label(kind))
+            return
+        if QMessageBox.question(
+                self, tr("Áp cho cả tầng"),
+                tr("Áp thông số đang sửa của «%s» cho %d cấu kiện cùng loại "
+                   "trên tầng này?") % (_type_label(kind), len(targets)),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No) != QMessageBox.Yes:
+            return
+
+        params = {key: self._read_field(key) for key in self._fields}
+        params = {k: v for k, v in params.items() if v is not None}
+        if not params:
+            self.hint.setText(tr("Không có thông số nào để áp."))
+            return
+        commands = [bim_commands.set_params(str(e["id"]), params)
+                    for e in targets]
+        for command in commands:
+            command._rebuild = lambda s, b: sync(s, b)
+        history = self._window.viewport.history
+        history.execute(CompoundCommand(commands))
+        if history.last_error:
+            self.hint.setText(str(history.last_error))
+            return
+        self.hint.setText(
+            tr("Đã áp cho %d cấu kiện «%s» — một bước hoàn tác.")
+            % (len(targets), _type_label(kind)))
+        self.refresh()
+        self._window.viewport.notify_scene_changed()
 
     def _read_field(self, key: str):
         widget = self._fields.get(key)
@@ -338,6 +440,32 @@ _HIDDEN_KEYS = ("derived", "host_wall_id")
 
 #: Extra field labels that are not plain parameter ids.
 _EXTRA_LABELS = {"name": "Name"}
+
+#: The tab a parameter belongs in. The MATERIAL keys are named one by one
+#: because the schema spells them differently per type (``material_id``,
+#: ``frame_material_id`` …), and a substring test on «material» would put a
+#: door's leaf type — a shape — in the material tab.
+_MATERIAL_KEYS = frozenset({
+    "building_material_id", "material_id", "frame_material_id",
+    "leaf_material_id", "glass_material_id", "surface_material_id",
+})
+
+#: The parameters that describe SHAPE: the trade reads them in «Tạo hình».
+_SHAPE_KEYS = frozenset({
+    "thickness_mm", "height_mm", "width_mm", "depth_mm", "length_mm",
+    "radius_mm", "sill_height_mm", "top_offset_mm", "offset_mm",
+    "riser_mm", "tread_mm", "slope_deg", "opening_angle_deg",
+    "panels", "layers", "profile", "outline_mm", "axes", "points",
+})
+
+
+def _tab_for(key: str) -> str:
+    """Which tab one schema key belongs in."""
+    if str(key) in _MATERIAL_KEYS:
+        return "material"
+    if str(key) in _SHAPE_KEYS:
+        return "shape"
+    return "element"
 
 
 def _type_label(kind: str) -> str:
