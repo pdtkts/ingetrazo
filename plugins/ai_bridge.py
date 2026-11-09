@@ -303,6 +303,18 @@ class _Bridge(QObject):
                 str(args.get("path") or "model.ifc")),
             "export_dxf": lambda: session.export_dxf(
                 str(args.get("path") or "plan.dxf"), args.get("story_id")),
+            # The samples and the office's inking: what the menus do, an
+            # agent must be able to do too, or the bridge is a second,
+            # smaller application.
+            "samples": session.list_samples,
+            "sample": lambda: session.sample(str(args.get("key"))),
+            "pens": session.pens,
+            "set_pen": lambda: session.set_pen(
+                str(args.get("key")), float(args.get("width_mm") or 0.18),
+                args.get("color"), args.get("linetype")),
+            "layers": session.pens,
+            "rename_layer": lambda: session.rename_layer(
+                str(args.get("key")), str(args.get("name") or "")),
         }
         action = str(action or "state")
         run = actions.get(action)

@@ -197,15 +197,36 @@ class BimSession:
                 "layer_renames": dict(_pens.renames(self.scene))}
 
     def set_pen(self, key: str, width_mm: float,
-                color: int | None = None, linetype: str | None = None) -> dict:
-        """Set one class of line: the office's pen for it."""
+                color: int | str | None = None,
+                linetype: str | None = None) -> dict:
+        """Set one class of line: the office's pen for it.
+
+        ``color`` is the AutoCAD index (7 = black, 1 = red ...), which is
+        what both tables store. A hex string is REFUSED rather than parsed:
+        an agent that guessed the format should be told, not silently
+        given a pen it never chose.
+        """
         from core.building import pens as _pens
 
         current = _pens.pen(self.scene, key)
+        if color is not None:
+            if isinstance(color, str):
+                try:
+                    color = int(color, 10)
+                except ValueError:
+                    raise ValueError(
+                        f"màu bút là chỉ số AutoCAD (0-256), không phải "
+                        f"{color!r}") from None
+            color = int(color)
+            if not 0 <= color <= 256:
+                raise ValueError(f"chỉ số màu {color} ngoài 0-256")
         table = _pens.pens(self.scene)
         table[str(key)] = (round(float(width_mm), 2),
                            int(current[1] if color is None else color),
                            str(current[2] if linetype is None else linetype))
+        # The table is DOCUMENT data: the bridge is a way of editing the
+        # document, so it marks it dirty exactly as the dialog does.
+        self.scene.version += 1
         return {"pen": list(table[str(key)])}
 
     def list_samples(self) -> list:
@@ -214,6 +235,46 @@ class BimSession:
         return [{"key": key, "name": _samples.name(key),
                  "note": _samples.preset(key)["note"]}
                 for key in _samples.keys()]
+
+    def rename_layer(self, key: str, name: str) -> dict:
+        """Give one class of line the office's own layer name on the way
+        out — ``key`` may be the class (``cut``) or the layer the file
+        carries today (``KT-CUT``). An empty ``name`` puts the class's own
+        layer back. The name is refused when it cannot be a DXF layer:
+        the file's layer table is the drawing office's contract, and a
+        name with a stray newline breaks the whole export, not one line.
+        """
+        from core.building import pens as _pens
+
+        # ``key`` may be the class, the layer the file carries today, or
+        # the name the office gave it — an agent that just renamed a layer
+        # reads the new name back from ``pens`` and must be able to use it.
+        table = dict(_pens.LAYER_KEYS)
+        renames = dict(_pens.renames(self.scene))
+        standard = table.get(str(key))
+        if standard is None:
+            standard = next((v for v in table.values() if v == str(key)), None)
+        if standard is None:
+            standard = next((std for std, own in renames.items()
+                             if own == str(key)), None)
+        if standard is None:
+            raise ValueError(
+                f"không có lớp {key!r}; các lớp: {sorted(table)}")
+        wanted = str(name or "").strip()
+        if wanted and ("\n" in wanted or "\r" in wanted or
+                       any(ch in wanted for ch in '<>/\\":;?*=`,')):
+            raise ValueError(f"tên lớp không hợp lệ: {wanted!r}")
+        renames = _pens.renames(self.scene)
+        if wanted and wanted != standard:
+            renames[standard] = wanted
+        else:
+            renames.pop(standard, None)
+        self.scene.version += 1
+        # The answer is the layer the file will now carry, asked by the
+        # CLASS's own key — not by whatever name the caller happened to
+        # use, which may be the old name it just replaced.
+        return {"layer": _pens.renames(self.scene).get(standard)
+                or _pens.LAYER_KEYS.get(standard, standard)}
 
 
 

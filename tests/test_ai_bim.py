@@ -199,3 +199,71 @@ def test_an_agent_can_build_a_sample_and_ink_it_like_the_office(bridge):
     # still arrived, and the file says a weight instead of a guess.
     assert layer.dxf.lineweight == 80, "bút của agent chưa tới file DXF"
     assert layer.dxf.linetype == "DASHED"
+
+
+def test_a_pen_colour_is_an_autocad_index_and_nothing_else(bridge):
+    """The tables hold the AutoCAD index, so an agent that sends a hex
+    colour is TOLD — silently flooring «#ff0000» to some index would give
+    the office a pen nobody chose, and the mistake would only show up on
+    paper."""
+    bridge, win = bridge
+    _bim(bridge, "sample", key="townhouse")
+
+    assert _bim(bridge, "set_pen", key="edge", width_mm=0.2,
+                color="7")["pen"] == [0.2, 7, "continuous"]
+    for bad, why in (("#ff0000", "hex"), (999, "ngoài khoảng")):
+        try:
+            _bim(bridge, "set_pen", key="edge", width_mm=0.2, color=bad)
+        except Exception as exc:                   # noqa: BLE001 — the reply
+            assert "chỉ số" in str(exc), (bad, exc)
+        else:                                      # pragma: no cover
+            raise AssertionError(f"{why}: {bad!r} lẽ ra phải bị từ chối")
+
+
+def test_the_agent_marks_the_document_dirty_when_it_inks_it(bridge):
+    """A pen is document data. The bridge is a way of editing the document,
+    so an agent's pen must leave the asterisk the dialog leaves — or the
+    office closes without saving the table it just set."""
+    bridge, win = bridge
+    _bim(bridge, "sample", key="townhouse")
+    win._saved_content = win.viewport.scene.content_version
+    assert not win._is_dirty()
+
+    _bim(bridge, "set_pen", key="cut", width_mm=0.9, color=1)
+    assert win._is_dirty(), "agent đổi bút mà tài liệu vẫn sạch"
+
+    win._saved_content = win.viewport.scene.content_version
+    _bim(bridge, "rename_layer", key="KT-CUT", name="A-WALL")
+    assert win._is_dirty(), "đổi tên lớp mà tài liệu vẫn sạch"
+
+
+def test_the_agent_can_give_a_layer_the_office_name(bridge):
+    """The layer table is the drawing office's contract with whoever opens
+    the file, and the agent edits it by class, by the layer the file
+    carries today, or by the name it already gave it."""
+    import ezdxf
+
+    bridge, win = bridge
+    _bim(bridge, "sample", key="townhouse")
+
+    assert _bim(bridge, "rename_layer", key="KT-CUT", name="A-WALL") == \
+        {"layer": "A-WALL"}
+    assert _bim(bridge, "rename_layer", key="A-WALL", name="A-WALL-2") == \
+        {"layer": "A-WALL-2"}, "không gọi lại được bằng tên vừa đặt"
+    assert _bim(bridge, "pens")["layer_renames"]["KT-CUT"] == "A-WALL-2"
+
+    story = _bim(bridge, "stories")[0]
+    out = Path(__import__("tempfile").mkdtemp()) / "layer.dxf"
+    _bim(bridge, "export_dxf", path=str(out), story_id=str(story["id"]))
+    names = {layer.dxf.name for layer in ezdxf.readfile(str(out)).layers}
+    assert "A-WALL-2" in names and "KT-CUT" not in names
+
+    assert _bim(bridge, "rename_layer", key="cut", name="") == \
+        {"layer": "KT-CUT"}, "xoá tên riêng không trả lớp về mặc định"
+    for bad in ("Tên\nCó Xuống Dòng", "Có/Nghiêng"):
+        try:
+            _bim(bridge, "rename_layer", key="cut", name=bad)
+        except Exception as exc:                   # noqa: BLE001 — the reply
+            assert "lớp" in str(exc)
+        else:                                      # pragma: no cover
+            raise AssertionError(f"{bad!r} lẽ ra phải bị từ chối")

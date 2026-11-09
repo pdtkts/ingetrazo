@@ -84,11 +84,13 @@ TOOLS = [
             "for 'make a house': actions state / stories / elements / "
             "story / wall / room / door / window / add / edit / remove / "
             "takeoff / takeoff_csv / drawings / docset / export_ifc / "
-            "export_dxf. Units are MILLIMETRES (a wall is start_mm → "
-            "end_mm; a door is u_mm along its host wall). Everything runs "
-            "in the user's undo stack — one step to undo — and appears on "
-            "screen as it happens. Typical flow: state → story → wall → "
-            "door → room → takeoff → docset."),
+            "export_dxf / samples / sample / pens / set_pen / layers / "
+            "rename_layer. Units are MILLIMETRES (a wall is start_mm → "
+            "end_mm; a door is u_mm along its host wall). A pen's colour "
+            "is the AutoCAD INDEX (7 = black, 1 = red ...), never hex. "
+            "Everything runs in the user's undo stack — one step to undo "
+            "— and appears on screen as it happens. Typical flow: state → "
+            "story → wall → door → room → takeoff → docset."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -113,6 +115,10 @@ TOOLS = [
                 "top_link": {"type": "string"},
                 "params": {"type": "object"},
                 "path": {"type": "string"},
+                "color": {"type": ["integer", "string"],
+                          "description": "pen colour: an AutoCAD index "
+                                         "(0-256), not hex"},
+                "linetype": {"type": "string"},
             },
             "required": ["action"],
         },

@@ -190,6 +190,52 @@ def main(argv=None) -> int:
     DS.generate_docset(scene, building)
     timings["docset_reissue_s"] = time.perf_counter() - t0
 
+    # The Plan window, which the acceptance run names: opening it is a
+    # scene of its own (a MainWindow with the model loaded) because that
+    # is what a user faces — the number is what the click costs.
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        if QApplication.instance() is None:
+            QApplication(sys.argv[:1])
+        from core.building.scene_sync import sync as _sync
+        from views.main_window import MainWindow
+        from views.plan_window import open_plan_window
+
+        win = MainWindow()
+        wbuilding = building_of(win.viewport.scene)
+        wbuilding.stories = [dict(s) for s in building.stories]
+        wbuilding.elements = [dict(e) for e in building.elements]
+        wbuilding.project.update(building.project)
+        _sync(win.viewport.scene, wbuilding)
+        # The cache is what the window reads; a direct assignment above
+        # must not leave a stale Building behind.
+        from core.building.model import store as _store
+        _store(win.viewport.scene, wbuilding)
+        # The plan reads the viewport's own geometry arrays; those are
+        # built the first time something asks for them, and in a real
+        # session the 3D view has already asked (the user is looking at
+        # the model when they open the plan). Warm it, so the number is
+        # the click's cost and not the price of a cold cache the app
+        # never sees — and record the cold cost separately.
+        t0 = time.perf_counter()
+        plan = open_plan_window(win)
+        timings["plan_open_cold_s"] = time.perf_counter() - t0
+        plan.canvas.reload()
+        plan.hide()
+        win._plan_window = None
+        t0 = time.perf_counter()
+        plan = open_plan_window(win)
+        timings["plan_open_s"] = time.perf_counter() - t0
+        t0 = time.perf_counter()
+        plan.canvas.reload()
+        timings["plan_reload_s"] = time.perf_counter() - t0
+        timings["plan_segments"] = len(plan.build_drawing()[0])
+        win.hide()
+    except Exception as exc:                        # noqa: BLE001 — optional
+        timings["plan_open_s"] = -1.0
+        timings["plan_note"] = f"{type(exc).__name__}: {exc}"
+
     if args.json:
         print(json.dumps(timings, ensure_ascii=False, indent=2))
     else:
@@ -197,7 +243,8 @@ def main(argv=None) -> int:
               f"{timings['groups']} khối")
         for key in ("build_s", "edit_s", "edit_full_s", "takeoff_s",
                     "hlr_collect_s", "hlr_s", "docset_s",
-                    "docset_reissue_s"):
+                    "docset_reissue_s", "plan_open_cold_s", "plan_open_s",
+                    "plan_reload_s"):
             print(f"  {key:18s} {timings[key] * 1000.0:9.1f} ms")
         print(f"  hlr_segments       {timings['hlr_segments']:9d}")
         print(f"  docset sheets      "
