@@ -12098,6 +12098,9 @@ class ComposerWindow(QMainWindow):
             else None,
             getattr(scene, "show_section_planes", True),
             getattr(scene, "show_section_cuts", True))
+        # View-only trim planes (a plan's floor limit): the frame publishes
+        # its own, the live scene's come back untouched.
+        keep_view_clips = list(getattr(scene, "view_clip_planes", None) or ())
         keep_style = getattr(scene, "display_style", None)
         # Base map / terrain / survey: a scene records their visibility too
         # (a plan sheet WITH the map next to a detail WITHOUT it).
@@ -12115,6 +12118,19 @@ class ComposerWindow(QMainWindow):
         try:
             apply_frame_camera(cam, frame, saved_view, scene)
             apply_frame_shadows(frame, scene)
+            # The frame's drawing rule brings its own trimming planes: the
+            # floor limit under a plan, the depth and sides of a section.
+            clips: list = []
+            drawing = getattr(saved_view, "drawing", None) if saved_view \
+                else None
+            if isinstance(drawing, dict):
+                from core.section import SectionPlane
+                for raw in drawing.get("clips") or ():
+                    try:
+                        clips.append(SectionPlane.from_dict(raw))
+                    except Exception:       # noqa: BLE001 — a view from a
+                        continue            # newer build must not break it
+            scene.view_clip_planes = clips
             # A layer set not to print stays out of every sheet, whatever
             # the frame's scene shows (the visibility comes back below).
             from core.layers import hide_unprinted
@@ -12130,6 +12146,7 @@ class ComposerWindow(QMainWindow):
                 scene.set_active_section(keep_section[0])
                 scene.show_section_planes = keep_section[1]
                 scene.show_section_cuts = keep_section[2]
+            scene.view_clip_planes = keep_view_clips
             if hasattr(scene, "display_style"):
                 scene.display_style = keep_style
             for obj, visible in keep_georef:
@@ -12575,7 +12592,8 @@ class ComposerWindow(QMainWindow):
                 fills=(getattr(frame, "cut_fill", "solid") or "solid")
                 != "none",
                 hidden=bool(getattr(frame, "hidden_lines", False)),
-                layers=by_layer)
+                layers=by_layer,
+                clip_planes=getattr(vp.scene, "view_clip_planes", None))
             style = getattr(vp.scene, "display_style", None)
             self.hlr_styles[id(frame)] = (
                 (drawing.layers, line_styles(
@@ -12636,7 +12654,9 @@ class ComposerWindow(QMainWindow):
                                   fills=False,
                                   hidden=bool(getattr(frame, "hidden_lines",
                                                       False)),
-                                  layers=by_layer)
+                                  layers=by_layer,
+                                  clip_planes=getattr(
+                                      vp.scene, "view_clip_planes", None))
             if drawing.layers is not None:
                 # What the DXF export needs to write each layer as itself.
                 from core.layers import line_styles

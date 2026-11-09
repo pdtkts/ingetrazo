@@ -290,3 +290,65 @@ def test_annotation_is_one_undo_step_when_a_history_is_given(house):
     while history.undo():
         pass
     assert scene.dimensions == [] and scene.text_labels == []
+
+
+# ---- the drawing on a sheet -------------------------------------------------
+
+def test_placing_a_plan_on_a_sheet_records_the_rule_as_a_scene(house):
+    """A frame renders what a SCENE says: the drawing must be captured as
+    a saved scene, or the sheet would show whatever the live camera
+    happened to be left at — the very dependence on the model's state that
+    stating drawings as rules exists to remove."""
+    from core.composition import Composicion
+    b = house
+    scene = Scene()
+    view = D.view_for(b, {"kind": "story", "story_id": _story(b)["id"]})
+    sheet = Composicion(name="KT00-01", paper="A3")
+    frame = D.place_on_sheet(sheet, view, scene, name="Mặt bằng Tầng 1")
+
+    assert frame in sheet.frames
+    assert frame.view_key == "scene:Mặt bằng Tầng 1"
+    assert frame.scale_n == view.scale_denom
+    assert frame.show_title is True
+
+    (saved,) = scene.saved_views
+    assert saved.name == "Mặt bằng Tầng 1"
+    assert saved.drawing["kind"] == D.KIND_STORY
+    clips = saved.drawing["clips"]
+    assert len(clips) == 1
+    assert clips[0]["clip_only"] is True
+
+
+def test_re_placing_the_same_drawing_updates_it_in_place(house):
+    """Re-issuing is the normal case: the second placement must not leave
+    two scenes fighting over one frame key."""
+    from core.composition import Composicion
+    b = house
+    scene = Scene()
+    view = D.view_for(b, {"kind": "story", "story_id": _story(b)["id"]})
+    sheet = Composicion(name="KT00-01", paper="A3")
+    D.place_on_sheet(sheet, view, scene, name="Mặt bằng Tầng 1")
+    D.place_on_sheet(sheet, view, scene, name="Mặt bằng Tầng 1")
+    assert len(scene.saved_views) == 1
+
+
+def test_a_frame_renders_with_the_drawing_s_floor_trim(house):
+    """The composer publishes the scene's clips around the frame, so the
+    HLR pass drops what lies under the floor without a cut chord."""
+    from core.hlr import hlr_drawing
+    from core.composition import Composicion
+    from core.saved_views import SavedView
+    b = house
+    scene = Scene()
+    view = D.view_for(b, {"kind": "story", "story_id": _story(b)[ "id"]})
+    D.place_on_sheet(Composicion(name="KT00-01", paper="A3"), view, scene,
+                     name="Mặt bằng Tầng 1")
+    (saved,) = scene.saved_views
+    scene.view_clip_planes = [
+        __import__("core.section", fromlist=["SectionPlane"])
+        .SectionPlane.from_dict(raw) for raw in saved.drawing["clips"]]
+    assert len(scene.view_clip_planes) == 1
+    drawing = hlr_drawing(scene, view.camera())
+    assert drawing.segs.shape[1] == 4
+    # A clip plane never contributes a cut chord.
+    assert drawing.kinds is None or not (drawing.kinds == 2).any()

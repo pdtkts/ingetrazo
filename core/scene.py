@@ -148,6 +148,11 @@ class Scene:
     # View ▸ Section Planes / Section Cuts toggles.
     section_planes: list = field(default_factory=list)
     show_section_planes: bool = True
+    #: View-only trimming planes (ClipOnly section planes) a DRAWING brings
+    #: while it renders — a plan's floor limit. Never saved with the model
+    #: and never the user's: the composer publishes them around a frame and
+    #: puts the live set back afterwards.
+    view_clip_planes: list = field(default_factory=list)
     # View ▸ Hidden Objects / Hidden Geometry: hidden objects
     # (groups, components) and hidden geometry (faces, edges) are drawn
     # as a see-through grid and become selectable — the way back to

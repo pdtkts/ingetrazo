@@ -868,7 +868,9 @@ def hlr_drawing(scene, camera, geometry=None, profiles: bool = True,
     # The scene's own cut comes first (it draws the chords); the extra
     # planes a view brings (a plan's floor limit) then trim whatever is
     # left, quietly — they hide and never cut.
-    planes = ([sp] if sp is not None else []) + list(clip_planes or ())
+    extra = list(clip_planes if clip_planes is not None
+                 else (getattr(scene, "view_clip_planes", None) or ()))
+    planes = ([sp] if sp is not None else []) + extra
     cut_edges: list = []
     if planes:
         if soft_n is not None:          # the clipper walks tuple lists

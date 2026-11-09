@@ -671,3 +671,76 @@ def _wall_chains(building, walls) -> list:
 
 def _story_extent(building, story) -> tuple:
     return story_box(building, story)
+
+
+# ---- putting a drawing on a sheet -------------------------------------------
+
+#: The frame label a sheet shows under a view, per drawing kind.
+VIEW_LABELS = {
+    KIND_STORY: "Mặt bằng",
+    KIND_ROOF: "Mặt bằng mái",
+    KIND_TOP: "Nhìn trên",
+    KIND_SECTION: "Mặt cắt",
+    KIND_ELEVATION: "Mặt đứng",
+    KIND_INTERIOR: "Mặt đứng nội thất",
+    KIND_DETAIL: "Chi tiết",
+}
+
+
+def _place_clip_names(view: DrawingView) -> None:
+    """Tag every trim plane with the drawing it belongs to.
+
+    A saved scene keeps its rule as data, and the plane's own name is what
+    tells a reader (and a later migration) which drawing published it.
+    """
+    for i, sp in enumerate(view.clip_planes):
+        if not sp.name:
+            sp.name = f"{view.kind}:{i}"
+
+
+def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
+                   x_mm: float | None = None, y_mm: float | None = None,
+                   w_mm: float | None = None, h_mm: float | None = None,
+                   title: bool = True, style: str = "vectorial"):
+    """Put a drawing on a sheet as a saved scene + a frame that shows it.
+
+    The two halves are one operation because they are one thing: a FRAME
+    renders what a SCENE says, so the drawing's own camera and its trimming
+    planes must be recorded as a scene (which is also what makes the sheet
+    independent of where the live model happens to be left — the whole
+    point of stating a drawing as a rule). Returns the frame.
+    """
+    from core.composition import MarcoVista
+    from core.saved_views import SavedView
+
+    _place_clip_names(view)
+    scene_name = name or view.name or VIEW_LABELS.get(
+        view.kind, view.kind)
+    existing = next((sv for sv in scene.saved_views
+                     if sv.name == scene_name), None)
+    viewpoint = view.camera()
+    if existing is None:
+        existing = SavedView.capture(scene_name, scene, viewpoint)
+        existing.drawing = view.to_dict()
+        scene.saved_views.append(existing)
+    else:
+        existing.drawing = view.to_dict()
+
+    page_w, page_h = sheet.page_size_mm()
+    margin = float(sheet.margin_mm)
+    frame = MarcoVista(
+        x_mm=margin if x_mm is None else float(x_mm),
+        y_mm=margin if y_mm is None else float(y_mm),
+        w_mm=(page_w - 2 * margin) if w_mm is None else float(w_mm),
+        h_mm=(page_h - 2 * margin) if h_mm is None else float(h_mm),
+        scale_n=float(view.scale_denom),
+        view_key=f"scene:{scene_name}",
+        style=str(style))
+    if title:
+        frame.show_title = True
+        frame.title_text = name or scene_name
+        frame.title_style = "layout"
+        frame.title_scale = True
+    sheet.frames.append(frame)
+    scene.version += 1
+    return frame

@@ -25,7 +25,7 @@ class SavedView:
                  fov_deg: float = 45.0, perspective: bool = True,
                  two_point: bool = False, hidden_layers=None, style=None, section=None,
                  georef=None, shadows=None, hidden_objects=None,
-                 hidden_shown=None) -> None:
+                 hidden_shown=None, drawing=None) -> None:
         self.name = name
         self.target = tuple(target)
         self.distance = float(distance)
@@ -76,6 +76,13 @@ class SavedView:
         #: (``{"objects": bool, "geometry": bool}``); scenes keep
         #: both. ``None`` = hands-off.
         self.hidden_shown = dict(hidden_shown) if hidden_shown else None
+        #: The DRAWING RULE this scene is (a ``DrawingView.to_dict()``): the
+        #: trimming planes a plan or a section brings — the floor limit, the
+        #: depth, the two sides of the line. Kept beside the section state
+        #: rather than inside it because a scene may own no plane of the
+        #: MODEL and still be a drawing (an elevation cuts nothing and is
+        #: still trimmed). ``None`` = an ordinary scene.
+        self.drawing = dict(drawing) if drawing else None
 
     # ---- Snapshot / recall ---------------------------------------------------
     @classmethod
@@ -109,7 +116,8 @@ class SavedView:
                        "objects": bool(getattr(scene, "show_hidden_objects",
                                                False)),
                        "geometry": bool(getattr(scene, "show_hidden_geometry",
-                                                False))})
+                                                False))},
+                   drawing=drawing_rule(scene))
 
     def recapture(self, scene, camera) -> None:
         """Update this view in place from the live state (keeps the name)."""
@@ -180,6 +188,8 @@ class SavedView:
             entry["style"] = dict(self.style)
         if self.section is not None:
             entry["section"] = dict(self.section)
+        if self.drawing is not None:
+            entry["drawing"] = dict(self.drawing)
         if self.georef is not None:
             entry["georef"] = dict(self.georef)
         if self.shadows is not None:
@@ -204,10 +214,24 @@ class SavedView:
                    hidden_layers=raw.get("hidden_layers"),
                    style=raw.get("style"),
                    section=raw.get("section"),
+                   drawing=raw.get("drawing"),
                    georef=raw.get("georef"),
                    shadows=raw.get("shadows"),
                    hidden_objects=raw.get("hidden_objects"),
                    hidden_shown=raw.get("hidden_shown"))
+
+
+def drawing_rule(scene) -> dict | None:
+    """The drawing rule the scene currently carries, if any.
+
+    A scene may hold nothing but the trimming planes the composer published
+    while a drawing was being made, yet those ARE its rule: saved as an
+    ordinary scene the plan would come back with the ground still under it.
+    """
+    clips = list(getattr(scene, "view_clip_planes", None) or ())
+    if not clips:
+        return None
+    return {"clips": [sp.to_dict() for sp in clips]}
 
 
 def apply_shadow_state(scene, raw: dict) -> None:
