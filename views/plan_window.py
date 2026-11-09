@@ -699,6 +699,13 @@ class PlanWindow(QDialog):
         if story is None:
             return []
         out: list = []
+        # What the OFFICE drew on this plan: the dimensions, levels and
+        # notes it placed here. They are entities in the document, so the
+        # window has to read them back — a dimension that prints but does
+        # not show is a drawing tool the user cannot trust.
+        for label in (getattr(self._scene, "text_labels", None) or ()):
+            at = label.position()
+            out.append((str(label.text), at.x() * 1000.0, at.y() * 1000.0))
         for name, x_mm, y_mm in _drawings.opening_tags(self._building,
                                                        story):
             out.append((name, x_mm, y_mm))
