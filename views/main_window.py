@@ -3077,6 +3077,15 @@ class MainWindow(QMainWindow):
         manage_action.triggered.connect(self._on_manage_details)
         menu.addAction(manage_action)
 
+        pens_action = QAction(tr("Bút vẽ & Lớp bản vẽ…"), self)
+        pens_action.setStatusTip(tr(
+            "Bảng bút của văn phòng: bề rộng nét, màu và kiểu nét cho từng "
+            "loại đường (cắt, thấy, khuất, kích thước, chữ, hatch) và tên "
+            "lớp gửi cho CAD khác khi xuất DXF. Tờ PDF và file DXF lấy "
+            "chung bảng này."))
+        pens_action.triggered.connect(self._on_manage_pens)
+        menu.addAction(pens_action)
+
     # ---- BIM menu actions ---------------------------------------------------
 
     def _bim_building(self):
@@ -3259,6 +3268,12 @@ class MainWindow(QMainWindow):
                counts["storeys"] + counts["walls"] + counts["openings"]
                + counts.get("counters", 0)), 6000)
 
+    def _on_manage_pens(self) -> None:
+        """Bút vẽ & Lớp bản vẽ: the office's own inking table."""
+        from views.pens_dialog import open_pens
+
+        open_pens(self)
+
     def _on_manage_details(self) -> None:
         """Quản lý chi tiết: the office's own edits to the standard set."""
         from views.detail_manager import open_detail_manager
@@ -3318,9 +3333,13 @@ class MainWindow(QMainWindow):
         view.annotation_key = f"dxf:{story['id']}"
         _drawings.annotate_plan(scene, building, view,
                                 key=view.annotation_key)
+        from core.building import pens as _pens
+
+        pen_table, layer_map = _pens.export_tables(scene)
         try:
             counts = save_plan_dxf(path, scene, building, str(story["id"]),
-                                   annotation_key=view.annotation_key)
+                                   annotation_key=view.annotation_key,
+                                   pens=pen_table, layer_map=layer_map)
         except Exception as exc:                    # noqa: BLE001 — reported
             QMessageBox.warning(self, tr("Xuất DXF"),
                                 f"{type(exc).__name__}: {exc}")

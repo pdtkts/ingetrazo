@@ -158,6 +158,11 @@ class Scene:
     #: library's own key. Saved with the document: a detail reissued from
     #: a saved file reads the same build-up it was drawn from.
     detail_overrides: dict = field(default_factory=dict)
+    #: The office's pen table (line widths, colours, patterns per class of
+    #: line) and its layer-name table — see ``core.building.pens``. Saved
+    #: with the document so a reissued sheet prints as it did last time.
+    pens: dict = field(default_factory=dict)
+    layer_renames: dict = field(default_factory=dict)
     #: View-only trimming planes (ClipOnly section planes) a DRAWING brings
     #: while it renders — a plan's floor limit. Never saved with the model
     #: and never the user's: the composer publishes them around a frame and
@@ -755,6 +760,8 @@ class Scene:
             self.plugin_data = {}
             self.bim_annotations = {}
             self.detail_overrides = {}
+            self.pens = {}
+            self.layer_renames = {}
             self.selection.clear()
             from core.layers import DEFAULT_LAYER, Layer
             self.layers = [Layer(DEFAULT_LAYER)]

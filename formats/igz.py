@@ -834,6 +834,12 @@ def save_scene(scene, path: Path) -> dict:
     details = getattr(scene, "detail_overrides", None)
     if isinstance(details, dict) and details:
         payload["detail_overrides"] = details
+    # The office's inking: two jobs by the same office print the same way.
+    for field, key in (("pens", "pens"), ("layer_renames", "layer_renames")):
+        table = getattr(scene, field, None)
+        if isinstance(table, dict) and table:
+            payload[key] = {str(k): list(v) if isinstance(v, tuple) else v
+                            for k, v in table.items()}
     guides = getattr(scene, "guides", None)
     if guides:
         # A guide at NaN is left out instead of refusing the save (#723):
@@ -1524,6 +1530,13 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
     _load_bim_annotations(scene, payload)
     overrides = payload.get("detail_overrides")
     scene.detail_overrides = overrides if isinstance(overrides, dict) else {}
+    pens = payload.get("pens")
+    scene.pens = {str(k): tuple(v) if isinstance(v, list) else v
+                  for k, v in pens.items()} if isinstance(pens, dict) else {}
+    renames = payload.get("layer_renames")
+    scene.layer_renames = (
+        {str(k): str(v) for k, v in renames.items()}
+        if isinstance(renames, dict) else {})
 
     from core.guide import Guide
     scene.guides.clear()

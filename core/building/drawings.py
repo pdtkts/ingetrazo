@@ -1111,6 +1111,14 @@ def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
         scale_n=float(view.scale_denom),
         view_key=f"scene:{scene_name}",
         style=str(style))
+    # The paper follows the document's pen table, so a sheet and the DXF
+    # of the same drawing are inked the same — one table, two outputs.
+    try:
+        from core.building import pens as _pens
+
+        _pens.as_frame_pens(scene, frame)
+    except Exception:                              # noqa: BLE001 — pens optional
+        pass
     if title:
         frame.show_title = True
         frame.title_text = name or scene_name

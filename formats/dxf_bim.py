@@ -58,6 +58,31 @@ def _try_ezdxf():
         return None
 
 
+def _dxf_linetype_pattern(name: str) -> list:
+    """The app's ``(dash, gap, …)`` pairs as a DXF pattern.
+
+    DXF states a simple line type flat: ``[total, +dash, -gap, …]``, in
+    drawing units. The app states it in PAPER millimetres, which is what
+    the office cares about, so the numbers cross unchanged and the file
+    is written with ``$LTSCALE = 1`` — a dashed line then reads dashed at
+    every plot scale instead of at one.
+    """
+    from core.layers import LINETYPES
+    pairs = LINETYPES.get(str(name))
+    if not pairs:
+        return []
+    flat: list = []
+    for i in range(0, len(pairs) - 1, 2):
+        dash, gap = float(pairs[i]), float(pairs[i + 1])
+        if dash > 0:
+            flat.append(dash)
+        if gap:
+            flat.append(-abs(gap))
+    if not flat:
+        return []
+    return [float(sum(abs(v) for v in flat)), *flat]
+
+
 def _ensure_layer(doc, name: str, color: int, lineweight: float,
                   linetype: str = "CONTINUOUS"):
     if name not in doc.layers:
@@ -67,9 +92,16 @@ def _ensure_layer(doc, name: str, color: int, lineweight: float,
     layer.color = int(color)
     # ezdxf takes lineweight in 1/100 mm.
     layer.dxf.lineweight = int(round(lineweight * 100))
-    if linetype and linetype != "CONTINUOUS" and \
-            linetype in doc.linetypes:
-        layer.dxf.linetype = linetype
+    if linetype and linetype != "CONTINUOUS":
+        # The pattern is part of the office's table now, so the linetype
+        # is DEFINED here (scaled per mm, as AutoCAD's own are) instead of
+        # being dropped when the blank file happens not to carry it.
+        if linetype not in doc.linetypes:
+            pattern = _dxf_linetype_pattern(linetype)
+            if pattern:
+                doc.linetypes.add(linetype, pattern, description=linetype)
+        if linetype in doc.linetypes:
+            layer.dxf.linetype = linetype
     return layer
 
 
@@ -78,7 +110,8 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
                      with_hatch: bool = True, with_dimensions: bool = True,
                      with_text: bool = True, doc_name: str = "",
                      annotation_key: str = "",
-                     hatch_material: str = "") -> dict:
+                     hatch_material: str = "",
+                     pens: dict | None = None) -> dict:
     """Write one drawing's DXF. Returns a count summary.
 
     ``view`` is a :class:`core.building.drawings.DrawingView` (its camera
@@ -111,6 +144,19 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
                           section=(view.section_planes[0]
                                    if view.section_planes else None))
     counts = {"lines": 0, "hatch": 0, "dimensions": 0, "text": 0}
+    # Line patterns are stated in millimetres of paper; $LTSCALE = 1 makes
+    # the receiving CAD draw them at that size rather than scaling by unit.
+    try:
+        doc.header["$LTSCALE"] = 1.0
+    except Exception:                              # noqa: BLE001 — header optional
+        pass
+    # The office's pen table: a document that set its own widths is inked
+    # with them, and one that never opened the manager keeps the trade's.
+    table = dict(PEN_TABLE) if pens is None else {
+        str(key): (float(value[0]), int(value[1]))
+        for key, value in pens.items()
+        if key in PEN_TABLE and len(value) >= 2}
+    table = {**PEN_TABLE, **table}
     # The drawing arrives in camera-plane METRES (that is what the HLR
     # works in) while the file declares millimetres — the office's own
     # unit, and the one a receiving CAD reads geometry with. Everything
@@ -131,11 +177,16 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
         ("edge", "EDGE", 0),
         ("hidden", "HIDDEN", 3),
     )
+    linetypes = {str(key): str(value[2])
+                 for key, value in (pens or {}).items() if len(value) >= 3}
     for key, layer_key, wanted in classes:
-        lw, color = PEN_TABLE[key]
+        lw, color = table.get(key, PEN_TABLE[key])
         name = mapped_layer(f"KT-{layer_key}", layer_map)
+        linetype = linetypes.get(key) or (
+            "dashed" if key == "hidden" else "continuous")
+        from core.layers import DXF_LINETYPES
         _ensure_layer(doc, name, int(color), lw,
-                      linetype="HIDDEN" if key == "hidden" else "CONTINUOUS")
+                      linetype=DXF_LINETYPES.get(linetype, "CONTINUOUS"))
         for i, seg in enumerate(drawing.segs):
             # Unclassified segments are drawn as plain edges: a line drawn
             # on the wrong layer is a nuisance, a line not drawn is a fault.
@@ -147,7 +198,7 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
 
     # ---- the section fill ---------------------------------------------
     if with_hatch and drawing.loops:
-        lw, _ = PEN_TABLE["hatch"]
+        lw, _ = table.get("hatch", PEN_TABLE["hatch"])
         name = mapped_layer("KT-HATCH", layer_map)
         _ensure_layer(doc, name, 8, lw)
         # The pattern of each cut area is DERIVED here rather than written
@@ -173,7 +224,7 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
         import numpy as np
         from core.hlr import _to_cam, camera_basis
 
-        lw, _ = PEN_TABLE["text"]
+        lw, _ = table.get("text", PEN_TABLE["text"])
         name = mapped_layer("KT-TEXT", layer_map)
         _ensure_layer(doc, name, 7, lw)
         camera = view.camera()
@@ -203,7 +254,7 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
         import numpy as np
         from core.hlr import _to_cam, camera_basis
 
-        lw, _ = PEN_TABLE["dimension"]
+        lw, _ = table.get("dimension", PEN_TABLE["dimension"])
         name = mapped_layer("KT-DIM", layer_map)
         _ensure_layer(doc, name, 4, lw)
         style = "KT_DIM"
