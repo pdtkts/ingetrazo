@@ -3041,6 +3041,15 @@ class MainWindow(QMainWindow):
         dxf_action.triggered.connect(self._on_export_plan_dxf)
         menu.addAction(dxf_action)
 
+        schedule_action = QAction(tr("Bảng thống kê tương tác…"), self)
+        schedule_action.setStatusTip(tr(
+            "Mở bảng khối lượng đọc được ngay trong app: lọc theo tầng và "
+            "từ khoá, sắp xếp mọi cột, số liệu lấy đúng nguồn của bảng "
+            "xuất CSV."))
+        schedule_action.triggered.connect(self._on_open_schedule)
+        menu.addAction(schedule_action)
+        self._schedule_action = schedule_action
+
         detail_action = QAction(tr("Chi tiết thư viện…"), self)
         detail_action.setStatusTip(tr(
             "Chèn chi tiết cấu tạo có sẵn (sàn, mái, thang, khuôn cửa, "
@@ -3126,6 +3135,15 @@ class MainWindow(QMainWindow):
         dlg = DocSetDialog(self, scene=self.viewport.scene)
         dlg.finished.connect(lambda _code: self.viewport.update())
         dlg.open()
+
+    def _on_open_schedule(self) -> None:
+        """Bảng thống kê: the takeoff as a table, read where the model is."""
+        from views.schedule_dialog import open_schedule
+
+        dialog = open_schedule(self)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _on_open_plan_window(self) -> None:
         """Cửa sổ Plan: the flat view the office measures from."""

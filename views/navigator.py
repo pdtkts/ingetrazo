@@ -195,7 +195,9 @@ class NavigatorDock(QWidget):
                 (tr("Xuất DXF bản vẽ…"),
                  tr("Xuất mặt bằng ra DXF cho CAD khác")),
                 (tr("Bảng thống kê (CSV)…"),
-                 tr("Khối lượng ra CSV cho Excel"))):
+                 tr("Khối lượng ra CSV cho Excel")),
+                (tr("Bảng thống kê tương tác…"),
+                 tr("Đọc khối lượng ngay trong app, lọc và sắp xếp"))):
             row = QTreeWidgetItem([label])
             row.setToolTip(0, hint)
             row.setData(0, Qt.UserRole, ("action", label))
