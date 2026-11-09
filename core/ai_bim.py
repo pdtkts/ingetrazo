@@ -76,6 +76,41 @@ class BimSession:
         self._run(set_params(str(element_id), params))
         return self.element(element_id) or {}
 
+    def change_kind(self, element_id: str, kind: str) -> dict:
+        """Change what an element IS, keeping the parameters that apply.
+
+        Refused for a hosted type (a door, a window, a curtain wall) with
+        the reason and the gesture that works — an agent should get the
+        same sentence a person gets, not a half-built element.
+        """
+        from core.building.commands import change_kind
+        self._run(change_kind(str(element_id), str(kind)))
+        return self.element(element_id) or {}
+
+    def steel(self, name: str = "") -> list:
+        """The rolled-section catalogue, or the dimensions of one name."""
+        from core.building import steel as _steel
+
+        if name:
+            record = _steel.by_name(str(name))
+            return ([] if record is None else
+                    [{"name": str(name), "h_mm": record[0], "b_mm": record[1],
+                      "tw_mm": record[2], "tf_mm": record[3],
+                      "kg_per_m": record[4]}])
+        return [{"name": key, "kg_per_m": row[4]}
+                for key, row in _steel.SECTIONS.items()]
+
+    def set_steel(self, element_id: str, name: str) -> dict:
+        """Make a column or beam BE a catalogue section."""
+        from core.building import steel as _steel
+        from core.building.commands import set_params
+
+        values = _steel.adopt({}, str(name))
+        if not values:
+            raise ValueError(f"không có tiết diện {name!r} trong bảng thép")
+        self._run(set_params(str(element_id), values))
+        return self.element(element_id) or {}
+
     def remove(self, element_id: str) -> None:
         from core.building.commands import remove_element
         self._run(remove_element(str(element_id)))
@@ -302,6 +337,16 @@ class BimSession:
         history = self._history or getattr(self._viewport, "history", None)
         if history is not None:
             history.execute(command)
+            # A command that DECLINED (a hosted type without a host, a bad
+            # join) is a no-op with a reason in ``last_rejected``. An agent
+            # that is not told runs on believing its edit happened, and its
+            # next call is built on a model that does not exist — so the
+            # reason is raised here, in the words the UI would show.
+            rejected = getattr(history, "last_rejected", None)
+            if rejected:
+                raise ValueError(str(rejected))
+            if getattr(history, "last_error", None):
+                raise ValueError(str(history.last_error))
         else:
             command.do(self.scene)
 

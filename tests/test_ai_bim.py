@@ -267,3 +267,56 @@ def test_the_agent_can_give_a_layer_the_office_name(bridge):
             assert "lớp" in str(exc)
         else:                                      # pragma: no cover
             raise AssertionError(f"{bad!r} lẽ ra phải bị từ chối")
+
+
+def test_the_agent_can_change_what_an_element_is(bridge):
+    """«Đổi Loại» is an ordinary modelling gesture; an agent that cannot do
+    it has to delete and rebuild, which loses the element's identity."""
+    bridge, win = bridge
+    _bim(bridge, "sample", key="townhouse")
+    from core.building.model import building_of
+
+    slab = next(e for e in building_of(win.viewport.scene).elements
+                if e.get("type") == "slab")
+    made = _bim(bridge, "change_kind", element_id=str(slab["id"]),
+                kind="ceiling")
+    assert made["type"] == "ceiling"
+
+    # A hosted type is refused in the same words a person gets, and the
+    # element is left exactly as it was.
+    wall = next(e for e in building_of(win.viewport.scene).elements
+                if e.get("type") == "wall")
+    try:
+        _bim(bridge, "change_kind", element_id=str(wall["id"]),
+             kind="curtain_wall")
+    except Exception as exc:                       # noqa: BLE001 — the reply
+        assert "tường chủ" in str(exc), exc
+    else:                                          # pragma: no cover
+        raise AssertionError("đổi tường thành vách kính lẽ ra phải bị từ chối")
+    assert building_of(win.viewport.scene).element(
+        wall["id"])["type"] == "wall"
+
+
+def test_the_agent_specifies_steel_from_the_catalogue(bridge):
+    """A rolled section is ordered by NAME: an agent that can only set
+    x and y gives the shop a section nobody rolls."""
+    bridge, win = bridge
+    _bim(bridge, "sample", key="townhouse")
+    from core.building.model import building_of
+
+    rows = _bim(bridge, "steel")
+    assert len(rows) > 20
+    assert any(r["name"] == "H300x150x6.5x9" for r in rows)
+    one = _bim(bridge, "steel", steel="H300x150x6.5x9")
+    assert one and one[0]["kg_per_m"] == 37.3
+    assert _bim(bridge, "steel", steel="khong-co") == []
+
+    story = _bim(bridge, "stories")[0]
+    beam = _bim(bridge, "add", kind="beam", story_id=str(story["id"]),
+                params={"start_mm": [0.0, 0.0], "end_mm": [4000.0, 0.0]})
+    made = _bim(bridge, "set_steel", element_id=str(beam["id"]),
+                steel="H300x150x6.5x9")
+    assert made["params"]["steel_section"] == "H300x150x6.5x9"
+    assert {made["params"]["width_mm"], made["params"]["depth_mm"]} == \
+        {150.0, 300.0}
+    assert made["params"]["steel_web_mm"] == 6.5

@@ -85,7 +85,7 @@ TOOLS = [
             "story / wall / room / door / window / add / edit / remove / "
             "takeoff / takeoff_csv / drawings / docset / export_ifc / "
             "export_dxf / samples / sample / pens / set_pen / layers / "
-            "rename_layer. Units are MILLIMETRES (a wall is start_mm → "
+            "rename_layer / change_kind / steel / set_steel. Units are MILLIMETRES (a wall is start_mm → "
             "end_mm; a door is u_mm along its host wall). A pen's colour "
             "is the AutoCAD INDEX (7 = black, 1 = red ...), never hex. "
             "Everything runs in the user's undo stack — one step to undo "
@@ -119,6 +119,10 @@ TOOLS = [
                           "description": "pen colour: an AutoCAD index "
                                          "(0-256), not hex"},
                 "linetype": {"type": "string"},
+                "steel": {"type": "string",
+                          "description": "a rolled-section name from "
+                                         "action=\"steel\" (e.g. "
+                                         "H300x150x6.5x9)"},
             },
             "required": ["action"],
         },

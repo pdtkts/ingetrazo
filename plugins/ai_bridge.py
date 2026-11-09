@@ -293,6 +293,11 @@ class _Bridge(QObject):
             "edit": lambda: session.edit(str(args.get("element_id")),
                                          **(args.get("params") or {})),
             "remove": lambda: session.remove(str(args.get("element_id"))),
+            "change_kind": lambda: session.change_kind(
+                str(args.get("element_id")), str(args.get("kind"))),
+            "steel": lambda: session.steel(str(args.get("steel") or "")),
+            "set_steel": lambda: session.set_steel(
+                str(args.get("element_id")), str(args.get("steel"))),
             "takeoff": session.takeoff,
             "takeoff_csv": session.takeoff_csv,
             "drawings": lambda: session.drawings(
