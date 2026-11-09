@@ -260,6 +260,21 @@ class _DockDropZone(QWidget):
         p.end()
 
 
+#: Registry command ids the PLAN window runs itself (the 2D drawing and
+#: the lens). They are real commands, so the menu wires them to the plan
+#: instead of greying them out.
+OPEN_PLAN_COMMANDS = frozenset({
+    "dim", "dimension", "level", "text", "label", "grid", "magnifier",
+})
+
+#: Where a registry command's own id differs from the app's tool key.
+COMMAND_TOOLS_FOR_MENU = {
+    "dimension": "dim",
+    "text": "text",
+    "label": "label",
+}
+
+
 class MainWindow(QMainWindow):
     """Top-level IngeTrazo window."""
 
@@ -2993,6 +3008,26 @@ class MainWindow(QMainWindow):
             samples.addAction(action)
         menu.addMenu(samples)
 
+        # The workspace's seven groups, built FROM the registry: a command
+        # added there appears here without a second edit, and the two can
+        # never disagree about what the workspace contains. A command this
+        # build cannot run gets a DISABLED entry that says so, the same
+        # rule the Plan bar follows — a menu that silently omits a tool
+        # teaches the wrong workspace.
+        from core.building import registry as _registry
+
+        self._bim_group_menus = {}
+        for group_id, group_label in _registry.GROUPS:
+            members = [row[0] for row in _registry.LIST
+                       if len(row) > 2 and str(row[2]) == str(group_id)]
+            if not members:
+                continue
+            submenu = QMenu(tr(group_label), menu)
+            for cmd_id in members:
+                submenu.addAction(self._bim_command_action(cmd_id, submenu))
+            menu.addMenu(submenu)
+            self._bim_group_menus[str(group_id)] = submenu
+
         design = QMenu(tr("Design tools"), menu)
         for key in ("wall", "curtain_wall", "column", "beam", "slab",
                     "ceiling", "roof", "stair", "zone", "door", "window",
@@ -3246,6 +3281,49 @@ class MainWindow(QMainWindow):
             tr("Đã đặt %s lên tờ %s (1:%d).")
             % (made["name"], str(getattr(sheet, "name", "")),
                int(made["scale"])))
+
+    def _bim_command_action(self, cmd_id: str, parent) -> QAction:
+        """One registry command as a menu entry: real, or disabled + why.
+
+        A command the app implements is wired to the app's own tool (or,
+        for the plan's 2D drafting, opened with the Plan window focused on
+        it); one it does not is DISABLED and its tooltip says so, because
+        a menu entry that does nothing when clicked is worse than one that
+        admits it.
+        """
+        from core.building import registry as _registry
+
+        found = _registry.find(cmd_id)
+        label = str(found[1]) if found else str(cmd_id)
+        action = QAction(tr(label), parent)
+        tool = COMMAND_TOOLS_FOR_MENU.get(str(cmd_id), str(cmd_id))
+        available = tool in getattr(self, "_tools", {}) or \
+            str(tool) in ("magnifier",) or \
+            str(tool) in OPEN_PLAN_COMMANDS
+        action.setStatusTip(tr(label))
+        if not available:
+            action.setEnabled(False)
+            action.setToolTip(
+                tr("%s — công cụ này chưa có trong bản dựng.") % label)
+            return action
+        action.triggered.connect(
+            lambda _on=False, k=str(tool), c=str(cmd_id):
+            self._run_bim_command(k, c))
+        return action
+
+    def _run_bim_command(self, tool: str, cmd_id: str) -> None:
+        """Run one registry command: the plan's own, or the app's tool."""
+        if tool in OPEN_PLAN_COMMANDS:
+            self._on_open_plan_window()
+            plan = getattr(self, "_plan_window", None)
+            if plan is not None:
+                plan._run_tool(tool)
+            return
+        activate = getattr(self, "_activate_tool", None)
+        if callable(activate):
+            activate(tool)
+        else:                                        # pragma: no cover
+            del cmd_id
 
     def _apply_office_defaults(self, scene) -> None:
         """Stamp the office's tables on a NEW document.

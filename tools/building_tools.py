@@ -424,6 +424,61 @@ class ZoneTool(AreaTool):
     pick_first = True
 
 
+class StairTool(BaselineTool):
+    """Stair: two clicks along the centre line, treads solved between them.
+
+    The riser count follows the storey's own height (which is where the
+    height comes from — a stair that does not reach the floor above is
+    not a stair), and the builder warns when the riser lands outside the
+    150-190 mm the trade builds in, so a wrong height is caught while the
+    model is still being drawn.
+    """
+
+    name = "Stair"
+    description = "Draw a stair along its centre line; treads follow."
+    kind = "stair"
+
+    def _params(self, viewport) -> dict:
+        params = super()._params(viewport)
+        building = self._building(viewport)
+        story = building.active_story() or _first_story(building)
+        # The stair solves its treads from the storey's own height: a
+        # stair that does not reach the floor above is not a stair.
+        params["height_mm"] = float((story or {}).get("height_mm", 3300.0))
+        return params
+
+    def baseline_params(self, p0, p1) -> dict:
+        """A stair's geometry is a PATH, not a baseline pair."""
+        return {"path_mm": [[float(p0[0]), float(p0[1])],
+                            [float(p1[0]), float(p1[1])]]}
+
+    def _commit(self, viewport, command) -> None:
+        """Build the stair, then read back what the builder warned about.
+
+        The riser count follows the storey height, which the office can be
+        modelling rather than choosing; the builder's own warning (outside
+        150-190 mm) is the thing that tells them, so it is lifted onto the
+        element and reported after the step.
+        """
+        # The warning is read BEFORE the step runs its report: the report
+        # is what puts it on the status bar, and a warning collected after
+        # the report is a warning nobody sees.
+        building = self._building(viewport)
+        before = {str(e.get("id")) for e in building.elements}
+        super()._commit(viewport, command)
+        building = self._building(viewport)
+        stair = next((e for e in reversed(building.elements)
+                      if e.get("type") == "stair"
+                      and str(e.get("id")) not in before), None)
+        warn = (stair or {}).get("derived", {}).get("warn")
+        if warn:
+            # Reported here rather than through the base path: this runs
+            # after the command, when the element exists to be read.
+            bar = getattr(viewport.window(), "statusBar", None)
+            if callable(bar):
+                bar().showMessage(str(warn), 8000)
+
+
 class CurtainWallTool(BaselineTool):
     """Curtain wall: a glazed run between two points."""
 
@@ -663,6 +718,7 @@ BIM_TOOLS = (
     ("slab", SlabTool),
     ("ceiling", CeilingTool),
     ("roof", RoofTool),
+    ("stair", StairTool),
     ("zone", ZoneTool),
     ("door", DoorTool),
     ("window", WindowTool),

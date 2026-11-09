@@ -396,3 +396,77 @@ def test_select_same_kind_takes_the_whole_storey():
     win._bim_select_same_kind({"wall"})
     assert len(scene.selection) == expected
     win.hide()
+
+
+def test_the_seven_workspace_groups_are_built_from_the_registry():
+    """The workspace claims seven groups of commands. The menu is built
+    FROM `registry.LIST`, so a command added there appears without a
+    second edit — and a command this build cannot run is DISABLED with a
+    reason instead of doing nothing when clicked."""
+    from core.building import registry
+
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    menus = getattr(win, "_bim_group_menus", {})
+    assert set(menus) == {str(g[0]) for g in registry.GROUPS}, sorted(menus)
+    total = sum(len(m.actions()) for m in menus.values())
+    expected = len([row for row in registry.LIST if len(row) > 2])
+    assert total == expected, (total, expected)
+    for menu in menus.values():
+        for action in menu.actions():
+            if action.isEnabled():
+                continue
+            assert action.toolTip(), action.text()
+            assert "chưa có" in action.toolTip(), action.text()
+    win.hide()
+
+
+def test_a_plan_command_in_the_menu_opens_the_plan_and_arms_the_tool():
+    """`Dimension` is a real command whose points come from the PLAN: the
+    menu entry must open the window and arm the tool, not select a 3D
+    tool that cannot measure."""
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    document = win._bim_group_menus["document"]
+    action = next(a for a in document.actions() if a.text() == "Dimension")
+    assert action.isEnabled()
+    action.trigger()
+    plan = getattr(win, "_plan_window", None)
+    assert plan is not None, "bấm Dimension mà không mở cửa sổ Plan"
+    assert type(plan._draft).__name__ == "DimensionTool"
+    plan.cancel_draft()
+    plan.hide()
+    win.hide()
+
+
+def test_the_stair_tool_builds_a_stair_and_reports_a_bad_riser():
+    """The stair is the one design command that had no tool. Its riser
+    count follows the STOREY's own height, so the builder's warning
+    (outside 150-190 mm) has to reach the person drawing it — a warning
+    nobody sees may as well not exist."""
+    from PySide6.QtGui import QVector3D
+
+    from core.building import samples as S
+    from core.building.model import building_of
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    S.build_sample(win.viewport.history, win.viewport.scene, "townhouse")
+    assert "stair" in win._tools
+    tool = win._tools["stair"]
+    tool.start = QVector3D(1.0, 1.0, 0.0)
+    tool.end = QVector3D(1.0, 4.0, 0.0)
+    tool._finish(win.viewport)
+    building = building_of(win.viewport.scene)
+    stair = next(e for e in building.elements if e.get("type") == "stair")
+    params = stair["params"]
+    assert params["path_mm"] == [[1000.0, 1000.0], [1000.0, 4000.0]]
+    assert float(params["height_mm"]) == 3300.0, "chiều cao phải lấy từ tầng"
+    derived = stair.get("derived") or {}
+    assert derived.get("treads")
+    if derived.get("warn"):
+        assert "150" in win.statusBar().currentMessage(), \
+            "cảnh báo bậc thang không tới người dựng"
+    win.hide()
