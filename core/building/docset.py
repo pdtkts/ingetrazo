@@ -326,9 +326,37 @@ def generate_docset(scene, building, project=None, story_ids=None,
     # The sheet is issued when the model has a DOOR OR A WINDOW
     # (``GROUP_NEEDS["detail"]``), so the crop must accept either: a
     # windows-only model got a blank detail sheet, silently.
+    # An office's OWN crops come first: a region somebody drew on the plan
+    # is a drawing they asked for, and issuing the door detail instead
+    # would quietly answer a question nobody asked.
+    own_crops = [row for row in (building.settings or {}).get("drawings", [])
+                 if str(row.get("kind")) == "detail" and row.get("rect_mm")]
+    if detail_sheet is not None and own_crops:
+        for index, row in enumerate(own_crops[:4], start=1):
+            label = str(row.get("name") or f"Vùng hiển thị {index}")
+            story_id = str(row.get("story_id") or "")
+            source = _drawings.view_for(
+                building, {"kind": "story", "story_id": story_id})
+            view = _drawings.detail_view(building, row, source,
+                                         rect=row.get("rect_mm"),
+                                         scale_denom=25.0)
+            _sheets.fill_sheet(detail_sheet, view, scene, name=label,
+                               building=None, annotations=False)
+            tick(label, 1)
+            # ONE sheet, one frame: a second crop would be drawn on top of
+            # the first, so the sheet takes the first and the rest are
+            # reported rather than stacked.
+            break
+        if len(own_crops) > 1:
+            result.notes.append(
+                f"{len(own_crops) - 1} vùng hiển thị khác chưa có tờ riêng "
+                f"(bộ tờ hiện một vùng mỗi tờ).")
+
+    # The door crop is the FALLBACK: a model with no crop of its own still
+    # gets the window on one door that the joiner needs.
     first_door = next((e for e in building.elements
                        if e.get("type") in ("door", "window")), None)
-    if detail_sheet is not None and first_door is not None:
+    if detail_sheet is not None and not own_crops and first_door is not None:
         label = _sheet_view_label(detail_sheet)
         source = _drawings.view_for(
             building, {"kind": "story",

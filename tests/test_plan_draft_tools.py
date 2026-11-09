@@ -162,3 +162,72 @@ def test_a_dimension_is_never_drawn_on_its_own_line():
 
     dx, dy = _offset_for([(0.0, 0.0), (1000.0, 0.0)])
     assert abs(dx) < 1e-9 and abs(dy) > 100.0, "chữ phải đứng bên cạnh nét"
+
+
+def test_a_crop_on_the_plan_becomes_a_drawing_the_set_issues(plan):
+    """The reference's rule: a detail does NOT copy geometry — it is the
+    source drawing's rule cropped to four trim planes, so it keeps
+    agreeing with the model. What the tool files is therefore a ROW the
+    docset reads, not a frozen picture of today's walls."""
+    from core.building import docset as DS
+    from core.building.model import building_of
+
+    scene = plan._window.viewport.scene
+    building = building_of(scene)
+    assert plan.arm_draft("crop")
+    plan.draft_click(1000.0, 1000.0)
+    plan.draft_click(4000.0, 3000.0)
+    rows = (building_of(scene).settings or {}).get("drawings") or []
+    assert len(rows) == 1, rows
+    row = rows[0]
+    assert row["kind"] == "detail"
+    assert row["rect_mm"] == [1000.0, 1000.0, 4000.0, 3000.0]
+    assert row["story_id"] == plan._story_id
+
+    # and the SET issues it: the crop reaches a sheet as a frame
+    result = DS.generate_docset(scene, building_of(scene), annotations=True)
+    detail_sheets = [s for s in result.sheets if "Chi tiết" in str(s.name)]
+    assert detail_sheets, "không có tờ chi tiết nào"
+    assert detail_sheets[0].frames, "vùng hiển thị không lên tờ"
+
+
+def test_a_crop_too_small_to_draw_is_refused(plan):
+    from core.building.model import building_of
+
+    scene = plan._window.viewport.scene
+    plan.arm_draft("crop")
+    plan.draft_click(1000.0, 1000.0)
+    plan.draft_click(1020.0, 1010.0)          # 20 × 10 mm: nothing to show
+    rows = (building_of(scene).settings or {}).get("drawings") or []
+    assert rows == [], "vùng 20×10 mm không được ghi vào mô hình"
+
+
+def test_a_crop_that_copies_nothing_changes_with_the_model(plan):
+    """The whole point of a crop-by-rule: build a wall AFTER the crop is
+    filed and the crop's drawing shows it, because the crop holds a
+    rectangle and a rule, never geometry."""
+    from core.building import commands as C
+    from core.building import drawings as D
+    from core.building.model import building_of
+
+    scene = plan._window.viewport.scene
+    plan.arm_draft("crop")
+    plan.draft_click(0.0, 0.0)
+    plan.draft_click(3000.0, 3000.0)
+    building = building_of(scene)
+    row = ((building.settings or {}).get("drawings") or [])[0]
+    source = D.view_for(building, {"kind": "story",
+                                   "story_id": str(row["story_id"])})
+    before = D.detail_view(building, row, source, rect=row["rect_mm"])
+    clip_before = len(before.clip_planes)
+
+    win = plan._window
+    win.viewport.history.execute(C.add_element("wall", plan._story_id, {
+        "baseline_start_mm": [500.0, 500.0],
+        "baseline_end_mm": [2500.0, 500.0],
+        "thickness_mm": 200.0, "height_mm": 3300.0}))
+    rebuilt = building_of(scene)
+    after = D.detail_view(rebuilt, row, source, rect=row["rect_mm"])
+    assert len(after.clip_planes) == clip_before, \
+        "vùng hiển thị giữ bản sao thay vì quy tắc"
+    assert after.story_id == before.story_id

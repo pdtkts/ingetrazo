@@ -273,6 +273,72 @@ class GridTool(DraftTool):
         self.points = []
 
 
+class CropTool(DraftTool):
+    """Two clicks: a rectangle on the source, issued as a drawing.
+
+    The reference's rule, kept: a detail does NOT copy geometry — it is
+    the source drawing's own rule cropped to four trim planes, so it
+    keeps agreeing with the model afterwards. What this tool produces is
+    therefore a ROW the docset can issue, filed on the storey, not a
+    frozen picture of today's walls.
+    """
+
+    hint = "Vùng hiển thị: bấm góc thứ nhất, rồi góc đối diện"
+    points_needed = 2
+
+    def preview(self, x_mm: float, y_mm: float) -> list:
+        if not self.points:
+            return []
+        x0, y0 = self.points[0]
+        # A rectangle, not the diagonal: the corner the user is dragging
+        # is what they are aiming at.
+        return [(x0, y0, float(x_mm), y0), (float(x_mm), y0,
+                                            float(x_mm), float(y_mm)),
+                (float(x_mm), float(y_mm), x0, float(y_mm)),
+                (x0, float(y_mm), x0, y0)]
+
+    def commit(self) -> None:
+        from core.building import commands as bim_commands
+        from core.building import drawings as _drawings
+        from core.building.model import building_of
+
+        (x0, y0), (x1, y1) = self.points
+        u0, u1 = sorted((float(x0), float(x1)))
+        v0, v1 = sorted((float(y0), float(y1)))
+        if (u1 - u0) < 50.0 or (v1 - v0) < 50.0:
+            self.points = []
+            return
+        scene = self.plan._scene
+        building = building_of(scene)
+        row = {"kind": "detail", "story_id": self.plan._story_id,
+               "name": tr("Vùng hiển thị"),
+               "rect_mm": [u0, v0, u1, v1]}
+        # Adding the drawing to the building's own set is what makes it
+        # ISSUABLE: the docset reads rows, so a crop nobody can issue
+        # would be a rectangle drawn on a screen.
+        def mutate(b) -> None:
+            b.view_rows.append(row) if hasattr(b, "view_rows") else None
+            settings = b.settings.setdefault("drawings", [])
+            settings.append(row)
+
+        _, source_row = self.plan._view_row, None
+        source_row = {"kind": "story", "story_id": self.plan._story_id}
+        view = _drawings.view_for(building, source_row)
+        detail = _drawings.detail_view(building, row, view)
+        command = bim_commands.BuildingEdit(mutate)
+        command._rebuild = None
+        self.plan._write(command)
+        made = {
+            "name": str(row["name"]),
+            "rect_mm": [u0, v0, u1, v1],
+            "scale_denom": float(detail.scale_denom),
+            "clips": len(detail.clip_planes),
+        }
+        self.plan._say(tr("Đã tạo vùng hiển thị %s: %.0f×%.0f mm, %d mặt cắt.")
+                       % (made["name"], u1 - u0, v1 - v0, made["clips"]))
+        self.points = []
+
+
 #: The plan command ids these tools implement, in the registry's spelling.
 DRAFT_TOOLS = {
     "dim": DimensionTool,
@@ -281,6 +347,7 @@ DRAFT_TOOLS = {
     "text": TextTool,
     "label": LabelTool,
     "grid": GridTool,
+    "crop": CropTool,
 }
 
 
