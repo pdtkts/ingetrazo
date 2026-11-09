@@ -615,6 +615,40 @@ def draw_grid(scene, building, view: DrawingView, *, history=None,
     return made
 
 
+def section_marks(building, story) -> list:
+    """The section rows filed against a storey, ready to mark on its plan.
+
+    A section drawing is only usable if the plan shows WHERE it cuts: the
+    cut line, the direction the viewer looks, and the letter that matches
+    the sheet. The rows live in the building's own settings (what the
+    document editor writes), so this reads them rather than inventing a
+    second place for the same data.
+
+    Returns ``[(symbol, p1_mm, p2_mm, normal_xy), …]`` — the cut line's
+    two ends in model mm, and the unit normal pointing the way the viewer
+    stands.
+    """
+    rows = (building.settings or {}).get("sections") or []
+    out: list = []
+    for row in rows:
+        if str(row.get("story_id") or "") not in ("", str(story["id"])):
+            continue
+        p1 = row.get("p1")
+        p2 = row.get("p2")
+        if not p1 or not p2:
+            continue
+        n = row.get("normal") or (0.0, -1.0)
+        length = math.hypot(float(p2[0]) - float(p1[0]),
+                            float(p2[1]) - float(p1[1]))
+        if length < 1e-6:
+            continue
+        out.append((str(row.get("symbol") or row.get("name") or "A"),
+                    (float(p1[0]), float(p1[1])),
+                    (float(p2[0]), float(p2[1])),
+                    (float(n[0]), float(n[1]))))
+    return out
+
+
 def opening_tags(building, story) -> list:
     """``[(name, x_mm, y_mm), …]`` — where each opening's mark stands.
 
@@ -737,6 +771,27 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
                 QVector3D(0.0, 0.0, (level_mm - story_z) / 1000.0 + dy),
                 text, layer=ANNOT_LAYER)
             add(AddTextLabelCommand(label), label, scene.text_labels)
+
+    for symbol, p1, p2, normal in section_marks(building, story):
+        # The mark is the section's own letter plus one arrow per end,
+        # turned the way the viewer looks — the plan's answer to "where
+        # does this section come from".
+        for end in (p1, p2):
+            label = TextLabel(
+                QVector3D(end[0] / 1000.0, end[1] / 1000.0,
+                          (story_z + float(view.row.get("cut_mm")
+                                           or DEFAULT_CUT_MM)) / 1000.0),
+                QVector3D(0.0, 0.0, 0.0), symbol, layer=ANNOT_LAYER)
+            add(AddTextLabelCommand(label), label, scene.text_labels)
+        cut = Dimension(
+            QVector3D(p1[0] / 1000.0, p1[1] / 1000.0,
+                      (story_z + float(view.row.get("cut_mm")
+                                       or DEFAULT_CUT_MM)) / 1000.0),
+            QVector3D(p2[0] / 1000.0, p2[1] / 1000.0,
+                      (story_z + float(view.row.get("cut_mm")
+                                       or DEFAULT_CUT_MM)) / 1000.0),
+            QVector3D(0.0, 0.0, 0.0), text="", layer=ANNOT_LAYER)
+        add(AddDimensionCommand(cut), cut, scene.dimensions)
 
     for mark, mx, my in opening_tags(building, story):
         # The mark is the drawing's own word for the opening, so it lands

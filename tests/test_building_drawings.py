@@ -456,3 +456,35 @@ def test_an_opening_whose_wall_is_gone_is_skipped_not_crashed():
         "host_wall_id": "khong-ton-tai", "offset_along_wall_mm": 0.0,
         "width_mm": 900.0, "height_mm": 2200.0, "name": "D9"})
     assert opening_tags(b, story) == []
+
+
+def test_a_section_row_marks_its_cut_line_on_the_plan():
+    """A section is only usable if the plan shows where it cuts and which
+    way the viewer looks: the letter at both ends, the cut line between."""
+    from core.building.drawings import section_marks
+    from core.building.model import Building
+
+    b = Building()
+    story = b.add_story("Tầng 1", 0.0, 3300.0)
+    b.settings["sections"] = [
+        {"symbol": "A", "story_id": story["id"], "p1": [-500.0, 2000.0],
+         "p2": [6500.0, 2000.0], "normal": [0.0, -1.0]},
+        # Another storey's section must not appear on this plan.
+        {"symbol": "B", "story_id": "khac", "p1": [0.0, 0.0],
+         "p2": [1.0, 0.0], "normal": [0.0, 1.0]},
+    ]
+    marks = section_marks(b, story)
+    assert [m[0] for m in marks] == ["A"]
+    assert marks[0][3] == (0.0, -1.0)
+
+
+def test_a_section_row_with_no_line_is_ignored():
+    from core.building.drawings import section_marks
+    from core.building.model import Building
+
+    b = Building()
+    story = b.add_story("Tầng 1", 0.0, 3300.0)
+    b.settings["sections"] = [{"symbol": "A", "story_id": story["id"]},
+                              {"symbol": "B", "story_id": story["id"],
+                               "p1": [0.0, 0.0], "p2": [0.0, 0.0]}]
+    assert section_marks(b, story) == []
