@@ -367,3 +367,34 @@ def test_the_open_plan_follows_an_edit_made_elsewhere(window):
     window.viewport.notify_scene_changed()
     assert plan.story_box.count() == 2, "cửa sổ Plan không theo mô hình"
     del M
+
+
+def test_the_magnifier_shows_the_same_drawing_under_a_lens():
+    """The lens is the window's own tool: it must read the SAME data the
+    canvas paints (model millimetres, one source), so it can never show a
+    different drawing from the one it magnifies, and it must be reachable
+    from the bar instead of being greyed out."""
+    from core.building import samples as S
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    S.build_sample(win.viewport.history, win.viewport.scene, "townhouse")
+    win._on_open_plan_window()
+    plan = win._plan_window
+    button = plan.bar_buttons["magnifier"]
+    assert button.isEnabled(), "kính lúp bị mờ"
+    assert "chưa có" not in button.toolTip()
+
+    plan._run_tool("magnifier")
+    assert plan._lens is not None and plan._lens.isVisible()
+    plan.lens_follow(3000.0, 2000.0)
+    assert plan._lens._at == (3000.0, 2000.0)
+    assert plan.canvas.model_segs, "kính lúp không có dữ liệu để soi"
+    assert plan.canvas.model_segs is plan.canvas._segs, \
+        "kính lúp đọc bản sao thay vì chính nét đang vẽ"
+    plan._lens.repaint()                  # must not raise
+
+    plan._run_tool("magnifier")
+    assert not plan._lens.isVisible(), "bấm lần hai phải tắt kính lúp"
+    plan.hide()
+    win.hide()

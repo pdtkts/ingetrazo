@@ -63,6 +63,9 @@ def key_for_command(cmd_id: str) -> str:
 #: Plan command id → the application's own tool key. Only what the tool
 #: table actually has: the rest of the bar stays disabled and says so.
 COMMAND_TOOLS = {
+    # The lens is the plan's own: a magnifier showing the 3D viewport would
+    # magnify something the drafter is not looking at.
+    "magnifier": "magnifier",
     # The plan's own 2D drawing (see views.draft_tools): these are handled
     # INSIDE the plan window, because the points they need are plan points.
     "dim": "dim", "level": "level", "text": "text", "label": "label",
@@ -98,6 +101,9 @@ class _Canvas(QWidget):
         self.offset = QPointF(0.0, 0.0)        # screen position of model 0,0
         self._drag_from = None
         self._segs: list = []
+        #: The plan's segments in MODEL mm: the magnifier draws these
+        #: through its own transform.
+        self.model_segs: list = []
         self._loops: list = []
         self._marks: list = []
         self._bbox = (0.0, 0.0, 1.0, 1.0)
@@ -125,6 +131,11 @@ class _Canvas(QWidget):
         """Recompute the drawing from the model (the only source of truth)."""
         self._segs, self._loops, self._marks, self._bbox = \
             self._plan.build_drawing()
+        # The same list, under a name with no screen in it: the magnifier
+        # reads it in MODEL millimetres and draws through its own
+        # transform, so what it shows is the drawing itself and never a
+        # re-projection of it.
+        self.model_segs = self._segs
         if self._needs_fit:
             self.fit()
         self.update()
@@ -267,6 +278,8 @@ class _Canvas(QWidget):
             self._plan._last_snap = snapped
             self._plan.draft_preview(snapped.x_mm, snapped.y_mm)
             self._snap_marker = snapped if snapped.kind != "none" else None
+            self._plan.lens_follow(snapped.x_mm, snapped.y_mm,
+                                   event.globalPosition().toPoint())
             return
         # Not drafting: still SHOW the snap, so an operator can see the
         # drawing's gravity before they commit to a tool.
@@ -276,6 +289,8 @@ class _Canvas(QWidget):
                                    float(plan_snap.SNAP_PX)
                                    / max(self.scale_px_per_mm, 1e-6))
         self._snap_marker = marker
+        self._plan.lens_follow(model[0], model[1],
+                               event.globalPosition().toPoint())
         if marker is not None:
             self._plan.report_hover(plan_snap.label_for(marker))
         name = self._plan.element_name_at(model)
@@ -620,6 +635,9 @@ class PlanWindow(QDialog):
         # label, grid) runs here, on the plan, because that is where its
         # points come from. Everything else is the application's own tool,
         # reached through the main window so it behaves identically.
+        if str(tool_key) == "magnifier":
+            self.toggle_magnifier()
+            return
         cmd_id = self._cmd_for_tool(tool_key)
         if cmd_id and self.arm_draft(cmd_id):
             return
@@ -632,6 +650,10 @@ class PlanWindow(QDialog):
         from views import draft_tools
 
         return str(tool_key) if tool_key in draft_tools.DRAFT_TOOLS else ""
+
+    def magnifier_available(self) -> bool:
+        """The lens is this window's own tool, so it is always runnable."""
+        return True
 
     # ---- reading the model ----------------------------------------------
     def refresh(self) -> None:
@@ -663,6 +685,8 @@ class PlanWindow(QDialog):
 
         if str(tool_key) in draft_tools.DRAFT_TOOLS:
             return True
+        if str(tool_key) == "magnifier":
+            return True
         return tool_key in getattr(self._window, "_tools", {})
 
     #: The drawing rule's own row (kind, storey, cut), kept so the drafting
@@ -686,6 +710,37 @@ class PlanWindow(QDialog):
                   % (self.story_box.currentText(),
                      int(_drawings.DEFAULT_CUT_MM),
                      int(self._view.scale_denom)))
+
+    # ---- the magnifier --------------------------------------------------
+    def toggle_magnifier(self, on: bool | None = None) -> None:
+        """Show (or hide) the lens that follows the cursor."""
+        wanted = not bool(self._lens and self._lens.isVisible()) \
+            if on is None else bool(on)
+        if wanted:
+            from views.plan_lens import LensWindow
+
+            if self._lens is None:
+                self._lens = LensWindow(self)
+            self._lens.show()
+            canvas = getattr(self, "canvas", None)
+            if canvas is not None:
+                canvas._lens_on = True
+            self._say(tr("Kính lúp: bật — di con trỏ trên bản vẽ để soi."))
+        else:
+            if self._lens is not None:
+                self._lens.hide()
+            canvas = getattr(self, "canvas", None)
+            if canvas is not None:
+                canvas._lens_on = False
+            self._say(tr("Kính lúp: tắt."))
+
+    def lens_follow(self, x_mm: float, y_mm: float,
+                    global_pos=None) -> None:
+        """Move the lens to the point under the cursor."""
+        lens = self._lens
+        if lens is None or not lens.isVisible():
+            return
+        lens.look_at(x_mm, y_mm, global_pos)
 
     def _on_snap_toggled(self, on: bool) -> None:
         self.snap_on = bool(on)
@@ -935,6 +990,12 @@ class PlanWindow(QDialog):
     #: Object snap on/off, and ortho, as the workspace's own toggles.
     snap_on = True
     ortho_on = False
+    #: The magnifier: a lens that follows the cursor and draws the same
+    #: plan at a fixed multiple, for the corner where two walls meet and
+    #: the dimension there has to be read rather than guessed.
+    _lens = None
+    LENS_FACTOR = 3.0
+    LENS_PX = 190
     #: The snap candidate table, rebuilt when the model changes (it walks
     #: every element, so it is not rebuilt per mouse move).
     _snap_pool: list = []
