@@ -3233,7 +3233,10 @@ class MainWindow(QMainWindow):
         from core.building import samples as _samples
 
         scene = self.viewport.scene
-        if scene.groups or scene.mesh.faces:
+        from core.building.model import building_of
+        # Content means geometry or BIM entities — a fresh document already
+        # carries its layer folder, which is not something the user drew.
+        if scene.mesh.faces or building_of(scene).elements:
             answer = QMessageBox.question(
                 self, tr("Dựng nhanh 3D"),
                 tr("Mô hình đang có nội dung. Dựng mẫu sẽ THÊM vào đó "
