@@ -889,6 +889,20 @@ class MainWindow(QMainWindow):
         self.project_browser = ProjectBrowser(self)
         from views.layers_panel import LayersDock
         self.layers_dock = LayersDock(self)
+        # The Navigator: the project / views / sheets / publisher tabs —
+        # the four questions a BIM workspace answers all day, over data
+        # that already exists (it owns nothing, so it cannot disagree).
+        from PySide6.QtWidgets import QDockWidget
+        from views.navigator import NavigatorDock
+        self._navigator_panel = NavigatorDock(self)
+        self.navigator = QDockWidget(tr("Navigator"), self)
+        self.navigator.setObjectName("tray_navigator")
+        self.navigator.setAllowedAreas(Qt.LeftDockWidgetArea
+                                       | Qt.RightDockWidgetArea)
+        self.navigator.setFeatures(QDockWidget.DockWidgetMovable
+                                   | QDockWidget.DockWidgetFloatable
+                                   | QDockWidget.DockWidgetClosable)
+        self.navigator.setWidget(self._navigator_panel)
         # The Browser ordering by layer lists them as the Layers tab does.
         self.layers_dock.panel.orderChanged.connect(
             self.project_browser.outliner.on_layer_order_changed)
@@ -898,7 +912,8 @@ class MainWindow(QMainWindow):
         # it. An empty title-bar widget removes the duplicate (a clean tray
         # look); panels are toggled from the View menu, not dragged around.
         for dock in (self.tray, self.bim_tray, self.georef_tray,
-                     self.project_browser, self.layers_dock):
+                     self.project_browser, self.layers_dock,
+                     self.navigator):
             dock.setTitleBarWidget(QWidget(dock))
         self.tray.raise_()
         self._build_sidebar_handle()
@@ -1858,6 +1873,18 @@ class MainWindow(QMainWindow):
         # presenting. Added to the WINDOW too, so the shortcut keeps
         # working while the menu bar itself is hidden.
         window_menu.addSeparator()
+        workspace_action = QAction(tr("BIM workspace"), self)
+        workspace_action.setStatusTip(tr(
+            "Bring the BIM environment forward: the Navigator, the "
+            "Building panel and the drawing tools."))
+        workspace_action.setCheckable(True)
+        workspace_action.setChecked(bool(QSettings().value(
+            "ui/bim_workspace", False, type=bool)))
+        workspace_action.toggled.connect(self._route_window_toggle(
+            "_act_bim_workspace", self._toggle_workspace))
+        self.addAction(workspace_action)
+        window_menu.addAction(workspace_action)
+        self._act_bim_workspace = workspace_action
         clean_action = QAction(tr("Clean screen"), self)
         clean_action.setStatusTip(tr(
             "Fold away every toolbar, panel and bar so only the model "
@@ -2129,7 +2156,7 @@ class MainWindow(QMainWindow):
     #: Properties first, the model's tree next, then the workspaces.
     def _default_tray_order(self) -> list:
         return [self.tray, self.project_browser, self.layers_dock,
-                self.bim_tray, self.georef_tray]
+                self.bim_tray, self.georef_tray, self.navigator]
 
     def _lay_out_trays(self) -> None:
         """The trays in their factory place: every one on the right, tabbed
@@ -2263,6 +2290,7 @@ class MainWindow(QMainWindow):
                             getattr(self, "georef_tray", None),
                             getattr(self, "project_browser", None),
                             getattr(self, "layers_dock", None),
+                            getattr(self, "navigator", None),
                             *getattr(self, "_extension_docks", ()))
                 if d is not None]
 
@@ -2386,6 +2414,34 @@ class MainWindow(QMainWindow):
                                   for a, k in self._icon_actions]
             from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self, self._place_sidebar_handle)   # after the relayout
+
+    def _toggle_workspace(self, on: bool) -> None:
+        """The ArchiCAD-style workspace: the tools of the trade, on one key.
+
+        OFF is the plain modelling workspace (the trays as they are);
+        ON brings the BIM environment to the front — the Navigator, the
+        Building panel and the Plan window's own bar — so a reader can
+        switch between «drawing a house» and «issuing its documents»
+        without hunting through menus. The choice is remembered per user,
+        like every other panel visibility in this window.
+        """
+        from PySide6.QtCore import QSettings
+        QSettings().setValue("ui/bim_workspace", bool(on))
+        wanted = [getattr(self, "navigator", None),
+                  getattr(self, "bim_tray", None)]
+        if on:
+            for dock in wanted:
+                if dock is not None:
+                    self.set_tray_shown(dock, True)
+            self.statusBar().showMessage(
+                tr("Workspace BIM: Navigator, Building và bảng vẽ đã mở."),
+                4000)
+        else:
+            for dock in wanted:
+                if dock is not None:
+                    self.set_tray_shown(dock, False)
+            self.statusBar().showMessage(
+                tr("Workspace dựng hình: bảng BIM đã ẩn."), 4000)
 
     def _toggle_clean_screen(self, on: bool) -> None:
         """AutoCAD's Ctrl+0: fold away every toolbar, dock and bar so only
@@ -6616,6 +6672,13 @@ class MainWindow(QMainWindow):
         vp.coordinateChanged.connect(
             live(lambda text: self._queue_status_text("coordinate", text)))
         vp.sceneVersionChanged.connect(live(self._on_scene_version_changed))
+        navigator = getattr(self, "_navigator_panel", None)
+        if navigator is not None:
+            # The Navigator reads the building, the views and the sheets;
+            # all three change on this one signal, so it follows it rather
+            # than polling or remembering.
+            vp.sceneVersionChanged.connect(live(lambda _v, n=navigator:
+                                                n.refresh()))
         # The extensions' «the document changed» calls (ExtensionApp).
         for fn in self.__dict__.get("_doc_change_hooks", ()):
             vp.sceneVersionChanged.connect(live(lambda _v, f=fn: f()))
