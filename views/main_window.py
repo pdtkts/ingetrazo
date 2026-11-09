@@ -3060,8 +3060,17 @@ class MainWindow(QMainWindow):
         panel_action.triggered.connect(self._on_show_building_panel)
         menu.addAction(panel_action)
 
-        # ---- the drawing set, the schedule and the exchange -------------
+        # ---- the job's own identity, then the drawing set ----------------
         menu.addSeparator()
+        project_action = QAction(tr("Thông tin dự án…"), self)
+        project_action.setStatusTip(tr(
+            "Số liệu in ở khung tên của mọi tờ: tên công trình, hạng mục, "
+            "địa điểm, chủ đầu tư, người thiết kế, chủ trì, ngày và lần "
+            "phát hành. Sửa một lần, cả bộ tờ theo — ô để trống thì lấy "
+            "theo thông tin chung của văn phòng."))
+        project_action.triggered.connect(self._on_project_info)
+        menu.addAction(project_action)
+
         docset_action = QAction(tr("Lập hồ sơ tự động…"), self)
         docset_action.setStatusTip(tr(
             "Sinh toàn bộ bộ bản vẽ (mặt bằng, mặt đứng, mặt cắt, chi "
@@ -3139,6 +3148,12 @@ class MainWindow(QMainWindow):
         menu.addAction(office_action)
 
     # ---- BIM menu actions ---------------------------------------------------
+
+    def _on_project_info(self) -> None:
+        """The job's own data — the title block every sheet prints."""
+        from views.project_dialog import open_project_info
+
+        open_project_info(self)
 
     def _bim_building(self):
         """The live building, or None with a word to the user."""

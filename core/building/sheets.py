@@ -65,6 +65,10 @@ GROUPS = (
 TITLE_ROWS = (
     ("CÔNG TRÌNH", "project"),
     ("HẠNG MỤC", "item"),
+    # The investor is who the drawing is FOR, and a Vietnamese set is read
+    # by them first: the row sits above the drawing's own identification
+    # for the same reason the project's name sits above it.
+    ("CHỦ ĐẦU TƯ", "owner"),
     ("LOẠI BẢN VẼ", "drawing"),
     ("TỶ LỆ", "scale"),
     ("SỐ BẢN VẼ", "number"),
@@ -183,6 +187,7 @@ def title_block(sheet: Composicion, project: dict, spec: SheetSpec,
     values = {
         "project": str(project.get("name") or ""),
         "item": str(project.get("item") or ""),
+        "owner": str(project.get("owner") or ""),
         "drawing": spec.title,
         "scale": f"1:{int(spec.scale_denom)}",
         "number": code,

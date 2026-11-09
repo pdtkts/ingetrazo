@@ -313,11 +313,18 @@ def save_building_ifc(scene, path, building=None, project_name: str = "") -> int
     project = w.add("IFCPROJECT", _s(ifc_guid()), "$", _s(name),
                     "$", "$", "$", "$", f"(#{context})", f"#{unit_assign}")
     placement = w.add("IFCLOCALPLACEMENT", "$", f"#{axis}")
-    site = w.add("IFCSITE", _s(ifc_guid()), "$", "'Site'", "$", "$",
+    # The site and the building carry the JOB's own names where the office
+    # gave them: a receiving tool shows «CÔNG TRÌNH» from its IFC tree, and
+    # a file whose every building is called «Building» makes the reader
+    # open the model to find out which job they are looking at.
+    job = building.project
+    site_name = str(job.get("address") or job.get("name") or "Site")
+    building_name = str(job.get("name") or "Building")
+    site = w.add("IFCSITE", _s(ifc_guid()), "$", _s(site_name), "$", "$",
                  f"#{placement}", "$", "$", ".ELEMENT.",
                  "$", "$", "$", "$", "$")
-    building_id = w.add("IFCBUILDING", _s(ifc_guid()), "$", "'Building'", "$",
-                        "$", f"#{placement}", "$", "$", ".ELEMENT.",
+    building_id = w.add("IFCBUILDING", _s(ifc_guid()), "$", _s(building_name),
+                        "$", "$", f"#{placement}", "$", "$", ".ELEMENT.",
                         "$", "$", "$")
     w.add("IFCRELAGGREGATES", _s(ifc_guid()), "$", "$", "$",
           f"#{project}", f"(#{site})")
