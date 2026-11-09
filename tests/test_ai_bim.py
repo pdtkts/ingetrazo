@@ -165,3 +165,37 @@ def test_the_scope_offers_both_the_session_and_the_tagger():
     scope = ai.build_scope(_VP())
     assert "bim" in scope and hasattr(scope["bim"], "add_story")
     assert "tags" in scope
+
+
+def test_an_agent_can_build_a_sample_and_ink_it_like_the_office(bridge):
+    """The bridge is not a second, smaller application: what the menus do,
+    an agent does — a whole sample building, and the pen table both the
+    DXF and the paper read."""
+    import ezdxf
+
+    bridge, win = bridge
+    rows = _bim(bridge, "samples")
+    assert [row["key"] for row in rows] == \
+        ["townhouse", "apartment", "office"]
+
+    made = _bim(bridge, "sample", key="townhouse")
+    assert made["counts"]["storeys"] == 3
+    assert len(_bim(bridge, "stories")) == 3
+
+    assert _bim(bridge, "pens")["pens"]["cut"] == [0.5, 7, "continuous"]
+    _bim(bridge, "set_pen", key="cut", width_mm=0.75, color=3,
+         linetype="dashed")
+    assert _bim(bridge, "pens")["pens"]["cut"] == [0.75, 3, "dashed"]
+
+    # and the export that follows actually carries it
+    out = Path(win.viewport.scene.plugin_data.get("tmp", "") or
+               __import__("tempfile").mkdtemp()) / "agent.dxf"
+    story = _bim(bridge, "stories")[0]
+    _bim(bridge, "export_dxf", path=str(out), story_id=str(story["id"]))
+    doc = ezdxf.readfile(str(out))
+    layer = doc.layers.get("KT-CUT")
+    # 0.75 mm has no lineweight of its own in DXF, so the file carries
+    # the nearest one the receiving CAD can draw (0.80) — the agent's pen
+    # still arrived, and the file says a weight instead of a guess.
+    assert layer.dxf.lineweight == 80, "bút của agent chưa tới file DXF"
+    assert layer.dxf.linetype == "DASHED"

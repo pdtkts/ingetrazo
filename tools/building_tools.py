@@ -81,18 +81,50 @@ class BuildingTool(Tool):
         return self._building(viewport)
 
     def _commit(self, viewport, command) -> None:
-        """Run a building command and refresh the geometry it changed."""
+        """Run a building command and refresh the geometry it changed.
+
+        The rebuild is handed to the COMMAND (not run after it) exactly as
+        the building panel does: inside the step it is part of the step's
+        own snapshot, so undo and redo restore the picture with the
+        parameters. It syncs only what the tool touched — a full resync of
+        three thousand elements is seven seconds, and a tool that rebuilds
+        the whole model to add one wall spends them for nothing.
+        """
         history = getattr(viewport, "history", None)
+        scene = self._scene(viewport)
+        if getattr(command, "_rebuild", None) is None:
+            command._rebuild = self._targeted_rebuild(viewport, command)
         if history is not None:
             history.execute(command)
         else:
-            command.do(self._scene(viewport))
-        sync(self._scene(viewport), self._building(viewport))
+            command.do(scene)
         notify = getattr(viewport, "notify_scene_changed", None)
         if callable(notify):
             notify()
         else:
             viewport.update()
+
+    def _targeted_rebuild(self, _viewport, command):
+        """A rebuild hook limited to the elements this command touched.
+
+        The command keeps the payload as it stood before the step (that is
+        what its Undo restores), so the touched ids are a diff of two dicts
+        — not a guess. The payload is read WHEN THE HOOK RUNS, inside the
+        command, never when the hook is built: at construction time the
+        command has not run yet and the answer is always ``None``, which
+        silently turned every targeted rebuild into an full resync (or, on
+        a command whose ``before`` was read lazily by a later caller, into
+        a rebuild of nothing at all).
+        """
+
+        def rebuild(scene, building) -> None:
+            before = getattr(command, "_before_payload", None)
+            ids = bim_commands.changed_element_ids(before, building)
+            if ids is None:
+                sync(scene, building)
+            else:
+                sync(scene, building, element_ids=ids)
+        return rebuild
 
     def _ground_z(self, viewport) -> float:
         """The active storey's elevation in scene units (metres)."""

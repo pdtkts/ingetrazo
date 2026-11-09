@@ -61,14 +61,20 @@ def _signature(building, element) -> tuple:
 def _same_signature(stored, signature) -> bool:
     """Compare a signature against the one a group carries.
 
-    The stored copy went through JSON (``.igz``), where tuples are lists, so
-    the comparison normalises both sides the same way — otherwise a reopened
-    document rebuilds everything once for no reason.
+    The stored copy may have gone through JSON (``.igz``), where a tuple
+    came back a list — so BOTH sides are normalised the same way before
+    they are compared. Comparing a JSON round-trip of the new signature
+    against the stored one (which may still be the in-memory tuple) made
+    every comparison unequal, which turned the targeted rebuild off: each
+    sync rebuilt the whole model and the "only what changed" path was
+    never taken.
     """
     if stored is None:
         return False
     import json
-    return stored == json.loads(json.dumps(list(signature)))
+    theirs = json.loads(json.dumps(stored))
+    ours = json.loads(json.dumps(list(signature)))
+    return theirs == ours
 
 
 def _freeze(value):

@@ -148,10 +148,74 @@ class BimSession:
         return save_building_ifc(self.scene, path)
 
     def export_dxf(self, path: str, story_id: str | None = None) -> dict:
+        from core.building import drawings as _drawings
+        from core.building import pens as _pens
         from formats.dxf_bim import save_plan_dxf
+
         story_id = story_id or (self.building.stories[0]["id"]
                                 if self.building.stories else None)
-        return save_plan_dxf(path, self.scene, self.building, str(story_id))
+        # The annotations this drawing is filed under. Without a key the
+        # export falls back to «everything the document holds» and writes
+        # ALL storeys' levels and room stamps onto one floor's drawing —
+        # numbers that are not wrong, only about a drawing nobody is
+        # looking at. So the export PUBLISHES this storey's annotations
+        # under its own key first, exactly as the menu does, and exports
+        # that: the agent's file is then the same drawing the menu's is.
+        view = _drawings.view_for(
+            self.building, {"kind": "story", "story_id": str(story_id)})
+        view.annotation_key = f"dxf:{story_id}"
+        _drawings.annotate_plan(self.scene, self.building, view,
+                                key=view.annotation_key)
+        # The office's own inking travels with the file, exactly as the
+        # menu's export does: an agent's DXF must not come out in default
+        # pens while the same drawing from the menu comes out in the
+        # office's.
+        pen_table, layer_map = _pens.export_tables(self.scene)
+        return save_plan_dxf(path, self.scene, self.building, str(story_id),
+                             annotation_key=view.annotation_key,
+                             pens=pen_table, layer_map=layer_map)
+
+    def sample(self, key: str) -> dict:
+        """Dựng nhanh 3D: one whole sample building, built through the same
+        commands a hand does, so the result is an ordinary model."""
+        from core.building import samples as _samples
+
+        history = self._history or getattr(self._viewport, "history", None)
+        if history is None:
+            raise RuntimeError("Phiên BIM không có sổ hoàn tác nào.")
+        _building, counts = _samples.build_sample(history, self.scene,
+                                                  str(key))
+        return {"sample": _samples.name(key), "counts": counts}
+
+    def pens(self) -> dict:
+        """How this document inks a drawing: the tables the DXF and the
+        paper both read."""
+        from core.building import pens as _pens
+
+        return {"pens": {key: list(value)
+                         for key, value in _pens.pens(self.scene).items()},
+                "layer_renames": dict(_pens.renames(self.scene))}
+
+    def set_pen(self, key: str, width_mm: float,
+                color: int | None = None, linetype: str | None = None) -> dict:
+        """Set one class of line: the office's pen for it."""
+        from core.building import pens as _pens
+
+        current = _pens.pen(self.scene, key)
+        table = _pens.pens(self.scene)
+        table[str(key)] = (round(float(width_mm), 2),
+                           int(current[1] if color is None else color),
+                           str(current[2] if linetype is None else linetype))
+        return {"pen": list(table[str(key)])}
+
+    def list_samples(self) -> list:
+        from core.building import samples as _samples
+
+        return [{"key": key, "name": _samples.name(key),
+                 "note": _samples.preset(key)["note"]}
+                for key in _samples.keys()]
+
+
 
     # ---- internals ------------------------------------------------------
     def _run(self, command) -> None:

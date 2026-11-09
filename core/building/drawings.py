@@ -601,6 +601,13 @@ def draw_grid(scene, building, view: DrawingView, *, history=None,
     axes = grid_axes(building, story)
     if not axes:
         return []
+    # Clear the PREVIOUS issue before this one draws anything. Running it
+    # after the labels were made (as it once did) deleted the axis lines
+    # this very call had just added — the mesh edges are part of the same
+    # registry entry, so a re-issue emptied the grid it had just drawn and
+    # left the registry naming edges that no longer existed.
+    if key:
+        _clear_annotations(scene, key)
     _grid_pen(scene)
     z_cut = (float(story.get("z_mm", 0.0))
              + _mm_or(view.row.get("cut_mm"), DEFAULT_CUT_MM)) / 1000.0
@@ -614,12 +621,23 @@ def draw_grid(scene, building, view: DrawingView, *, history=None,
         else:
             a = QVector3D(offset / 1000.0, lo / 1000.0, z_cut)
             b = QVector3D(offset / 1000.0, hi / 1000.0, z_cut)
+        # Every axis line goes into ``made`` — the registry entry is what
+        # a re-issue deletes, so a line that is drawn but NOT registered
+        # would be left standing by the next issue while its own name was
+        # removed. (The clear runs before this loop; the bookkeeping has
+        # to match what was actually drawn.)
         if history is not None:
             from core.history import AddEdgeCommand
-            history.execute(AddEdgeCommand(a, b))
-            edge = next((e for e in scene.mesh.edges
-                         if (QVector3D(e.a) - a).length() < 1e-6
-                         and (QVector3D(e.b) - b).length() < 1e-6), None)
+            command = AddEdgeCommand(a, b)
+            history.execute(command)
+            # The command's own edge, when it made one; otherwise look the
+            # coincident edge up. Asking the HISTORY is what keeps this
+            # honest on a redo and on a merge into an existing line.
+            edge = command.edge
+            if edge is None:
+                edge = next((e for e in scene.mesh.edges
+                             if (QVector3D(e.a) - a).length() < 1e-6
+                             and (QVector3D(e.b) - b).length() < 1e-6), None)
         else:
             edge = scene.add_edge(a, b)
         if edge is not None:
@@ -635,7 +653,6 @@ def draw_grid(scene, building, view: DrawingView, *, history=None,
                 scene.text_labels.append(bubble)
             made.append(bubble)
     if key:
-        _clear_annotations(scene, key)
         scene.bim_annotations.setdefault(key, []).extend(made)
     return made
 
@@ -875,7 +892,13 @@ def _clear_annotations(scene, key: str) -> list:
         if entity in scene.text_labels:
             scene.text_labels.remove(entity)
         if mesh is not None and entity in mesh.edges:
-            mesh.edges.remove(entity)
+            # ``remove_edge``, never ``edges.remove``: the list would drop
+            # it while its two endpoints still LISTED it, and the mesh's
+            # own weld-then-dedup then hands the next caller that detached
+            # ghost — an edge that is returned, stamped, registered, and
+            # never in the mesh (a grid whose axis lines could not be
+            # drawn a second time).
+            mesh.remove_edge(entity)
         scene.selection.discard(entity)
     return gone
 

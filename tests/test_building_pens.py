@@ -76,6 +76,8 @@ def test_the_dxf_is_written_with_the_office_s_pens(tmp_path):
     assert "A-WALL" in names
     assert "KT-CUT" not in names, "tên lớp cũ còn trong file"
     layer = doc.layers.get("A-WALL")
+    # 0.9 mm rides AutoCAD's own ladder; the file states a weight the
+    # receiving CAD has, not one it would have to round itself.
     assert layer.dxf.lineweight == 90, "bề rộng nét chưa theo bảng"
     assert layer.dxf.linetype == "DASHDOT"
     assert layer.color == 1

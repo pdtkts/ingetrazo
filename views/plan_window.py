@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFormLayout,
@@ -451,20 +451,57 @@ class PlanWindow(QDialog):
         version = getattr(viewport, "sceneVersionChanged", None)
         if version is not None:
             version.connect(self._on_model_version)
+        # The signal only fires when somebody REMEMBERS to emit it: the
+        # History bumps ``scene.version`` directly on undo and redo, and a
+        # window that only listened to the signal kept drawing — and
+        # picking against — a model that had already moved backwards.
+        # Watching the scene's own version closes that hole wherever the
+        # change came from.
+        self._seen_version = int(getattr(self._scene, "version", 0))
+        self._watch = QTimer(self)
+        self._watch.setInterval(250)
+        self._watch.timeout.connect(self._poll_version)
+        self._watch.start()
+
+    def _poll_version(self) -> None:
+        """Re-read when the SCENE's version moved, whoever moved it."""
+        seen = int(getattr(self._scene, "version", 0))
+        if seen != self._seen_version:
+            self._seen_version = seen
+            self._on_model_version(seen)
 
     def _on_model_version(self, _version=None) -> None:
         """The model changed under us: re-read, unless a drag owns it.
 
         A drag in progress is editing THAT element and has not committed
-        yet; re-reading mid-drag would rebuild the drawing over the ghost
-        and (worse) re-resolve the element the drag is holding.
+        yet; re-reading mid-drag would rebuild the drawing over the ghost.
+        But a change from SOMEWHERE ELSE (the menu's Undo, another panel,
+        an agent) is not the drag's own preview: the plan must let go of
+        the drag, because committing it afterwards would re-apply the
+        pre-drag payload over the other change. Letting go is the honest
+        answer — the drag was made against a state that no longer exists.
         """
-        if self._drag_origin is not None or self._edit_in_flight:
+        if self._edit_in_flight:
             return
+        if self._drag_origin is not None:
+            self._abandon_drag()
         self.refresh()
 
+    def _abandon_drag(self) -> None:
+        """Drop an in-flight drag without committing it."""
+        self._drag_origin = None
+        self._drag_base = None
+        self._drag_rests = []
+        self._pending = self._last_moved = None
+        canvas = getattr(self, "canvas", None)
+        if canvas is not None:
+            canvas._edit = None
+            canvas.end_ghost()
+        self._say(tr("Mô hình đã đổi ở nơi khác — thao tác kéo đã bỏ."))
+
     #: Set while a properties dialog is open, for the same reason: the
-    #: dialog's own write must not rebuild the drawing under it.
+    #: dialog's own write must not rebuild the drawing under it. Instance
+    #: state — two plan windows must not share one flag.
     _edit_in_flight = False
 
     # ---- the tool bar ----------------------------------------------------
@@ -547,6 +584,8 @@ class PlanWindow(QDialog):
     def refresh(self) -> None:
         """Re-read the building and the storey list, then redraw."""
         from core.building.model import building_of
+
+        self._seen_version = int(getattr(self._scene, "version", 0))
 
         self._building = building_of(self._scene)
         keep = self._story_id
@@ -950,8 +989,54 @@ class PlanWindow(QDialog):
         if not moved:
             return
         self._pending = self._last_moved = moved
-        self.canvas.set_ghost([(x0 + dx, y0 + dy, x1 + dx, y1 + dy)
-                               for x0, y0, x1, y1 in self._drag_rests])
+        if kind == "handle":
+            # A handle drag moves ONE end: the ghost's points near the
+            # grabbed end travel, the others stand. Translating the whole
+            # projection (as this once did) showed the far end walking
+            # across the plan while the model only stretched.
+            #
+            # The anchor is asked of the PLAN WINDOW, because the ghost's
+            # own coordinates are already in plan space (the view target
+            # is added back when it is built) — comparing them against a
+            # model-space point matched nothing and nothing stretched.
+            anchor = self._ghost_anchor(grab)
+            self.canvas.set_ghost(
+                self._stretched_ghost(self._drag_rests, anchor, dx, dy))
+        else:
+            self.canvas.set_ghost([(x0 + dx, y0 + dy, x1 + dx, y1 + dy)
+                                   for x0, y0, x1, y1 in self._drag_rests])
+
+    #: How far (model mm) a ghost point may stand from the dragged end and
+    #: still be pulled with it. Half a wall's thickness either way: the
+    #: far face of a 200 mm wall is 100 mm off its baseline.
+    GHOST_GRAB_MM = 700.0
+
+    @staticmethod
+    def _stretched_ghost(rests, anchor, dx, dy) -> list:
+        """The element's own edges with the end nearest ``anchor`` pulled.
+
+        Each point within :data:`GHOST_GRAB_MM` of the anchor moves with
+        the drag; the rest stay, so the ghost shows a stretch rather than a
+        slide — the same shape the rebuild will produce.
+        """
+        reach = PlanWindow.GHOST_GRAB_MM
+        ax, ay = float(anchor[0]), float(anchor[1])
+        out: list = []
+        for x0, y0, x1, y1 in rests:
+            near0 = math.hypot(x0 - ax, y0 - ay) <= reach
+            near1 = math.hypot(x1 - ax, y1 - ay) <= reach
+            out.append((x0 + (dx if near0 else 0.0),
+                        y0 + (dy if near0 else 0.0),
+                        x1 + (dx if near1 else 0.0),
+                        y1 + (dy if near1 else 0.0)))
+        return out
+
+    def _ghost_anchor(self, grab) -> tuple:
+        """A model-space grab point in the GHOST's own space (plan mm)."""
+        target = self._view.target if self._view is not None \
+            else (0.0, 0.0, 0.0)
+        return (float(grab[0]) + float(target[0]) * 1000.0,
+                float(grab[1]) + float(target[1]) * 1000.0)
 
     def _resting_projection(self, element) -> list:
         """The element's own edges as plan segments, from its rest mesh.
@@ -1032,6 +1117,22 @@ class PlanWindow(QDialog):
         self._drag_rests = []
         if not moved or origin is None or str(origin[0]) != str(element_id):
             return
+        # The payload the drag started from must still BE the document's.
+        # If somebody else changed the model while the drag was in flight
+        # (the menu's Undo, a panel, an agent), committing would put the
+        # pre-drag payload back ON TOP of their change — silently undoing
+        # their work. The drag was made against a state that is gone, so
+        # it is dropped instead.
+        # Only the BUILDING is compared, not the whole ``plugin_data``:
+        # a counter like ``building_rev`` moves on every store, and a
+        # comparison that noticed it would refuse every drag.
+        from core.building import model as _model
+
+        was = (origin[1] or {}).get(_model.DATA_KEY)
+        now = (self._scene.plugin_data or {}).get(_model.DATA_KEY)
+        if was != now:
+            self._say(tr("Mô hình đã đổi ở nơi khác — thao tác kéo đã bỏ."))
+            return
         from core.building import commands as bim_commands
         from core.building.scene_sync import sync
 
@@ -1067,9 +1168,20 @@ class PlanWindow(QDialog):
         return ((sx + ex) / 2.0, (sy + ey) / 2.0)
 
     def edit_element(self, element_id) -> None:
-        """The properties dialog for one element (double-click on the plan)."""
-        dialog = PlanPropertiesDialog(self, element_id)
-        dialog.exec()
+        """The properties dialog for one element (double-click on the plan).
+
+        The dialog writes through its OWN commands, and each of those
+        bumps the scene version — which the plan listens to and would
+        answer by rebuilding the drawing out from under the open dialog.
+        ``_edit_in_flight`` is what holds that off; it was declared and
+        never set, so the guard never engaged.
+        """
+        self._edit_in_flight = True
+        try:
+            dialog = PlanPropertiesDialog(self, element_id)
+            dialog.exec()
+        finally:
+            self._edit_in_flight = False
         self.refresh()
 
     def remove_element(self, element_id) -> None:

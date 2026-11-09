@@ -921,6 +921,14 @@ def _save_bim_annotations(scene, payload: dict) -> None:
         payload["bim_annotations"] = out
 
 
+#: Where each stored dimension ended up after the loader dropped its
+#: duplicates (see the loader). Module state because the registry is
+#: rebuilt by a function that takes only the scene and the payload; the
+#: loader sets it, the registry reader applies it, and the next open
+#: replaces it.
+_dim_position_remap: list = []
+
+
 def _load_bim_annotations(scene, payload: dict) -> None:
     """Rebuild the registry against the entities the loader just made."""
     rows_by_key = payload.get("bim_annotations")
@@ -939,6 +947,14 @@ def _load_bim_annotations(scene, payload: dict) -> None:
                 continue
             pool = (dims if kind == "dim" else labels if kind == "label"
                     else edges if kind == "edge" else [])
+            if kind == "dim" and _dim_position_remap:
+                # The dimension list was compacted by the dedup: the stored
+                # position is where the entry WAS, and the remap says where
+                # it is now (or which twin replaced it).
+                if 0 <= index < len(_dim_position_remap):
+                    index = _dim_position_remap[index]
+                else:
+                    continue
             if 0 <= index < len(pool):
                 found.append(pool[index])
         if found:
@@ -1441,21 +1457,35 @@ def _load_into_inner(scene, path: Path, progress=None) -> None:
         reserve_group_names(names)   # new groups never reuse a stored "Group N"
 
     # Until #765 every open-and-save doubled the dimensions: a file can hold
-    # each one 128 times over (1024 entries for 8, reported). The copies
-    # are identical entry for entry, so an entry equal to one already read
-    # is dropped; two dimensions that differ in anything both stay.
-    seen_dims: set = set()
-    for raw in payload.get("dimensions", []):
+    # each one 128 times over (1024 entries for 8, reported). The copies are
+    # identical entry for entry, so a repeated entry is dropped.
+    #
+    # The drop COMPACTS this list (a None in it would be read by exporters
+    # as a dimension), which moves every later entry — and the annotation
+    # registry stores each drawing's entities as POSITIONS in exactly this
+    # list. Compacting without telling the registry would hand a drawing
+    # the dimension of the storey before it. So the loader records where
+    # each surviving entry STARTED and REMAPS the registry's indexes
+    # through that, right after it rebuilds. An entry that disappears as a
+    # duplicate resolves to the copy that was kept, which is the same
+    # dimension by construction.
+    seen_dims: dict = {}
+    dim_positions: list = []            # original index -> new index or None
+    for original, raw in enumerate(payload.get("dimensions", [])):
         key = json.dumps(raw, sort_keys=True, default=str)
         if key in seen_dims:
+            dim_positions.append(seen_dims[key])       # a copy: same entity
             continue
-        seen_dims.add(key)
+        seen_dims[key] = len(scene.dimensions)
+        dim_positions.append(seen_dims[key])
         dim = Dimension(
             QVector3D(*raw["a"]), QVector3D(*raw["b"]),
             QVector3D(*raw["offset"]), layer=raw.get("layer") or None,
             text=raw.get("text") or None, axis=raw.get("axis") or None)
         dim.bind(scene)         # the vertex at that spot is the one snapped to
         scene.dimensions.append(dim)
+    _dim_position_remap.clear()
+    _dim_position_remap.extend(dim_positions)
 
     # A document from before the ends could be chosen drew oblique ticks:
     # it keeps them. Only a NEW document is born with arrows.

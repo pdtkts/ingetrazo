@@ -190,10 +190,21 @@ def changed_element_ids(before_payload, building):
 
     A command keeps the payload as it stood before its step (what Undo
     restores), so «what did this step touch» is a diff of two dicts rather
-    than a guess — the answer a targeted geometry rebuild needs. An
-    opening's geometry is the WALL's business, so a changed opening brings
-    its host wall along. ``None`` means «cannot tell»: the caller should
-    rebuild everything.
+    than a guess — the answer a targeted geometry rebuild needs.
+
+    The diff is deliberately WIDER than «the rows that differ», because a
+    building's geometry is not per-element:
+
+    * an opening's body is cut out of the WALL, so a changed opening
+      brings its host along;
+    * a WALL's body is trimmed against every other wall it meets, so a
+      changed wall brings its whole STOREY — the join at the corner is a
+      property of the pair, and rebuilding one of them leaves the other
+      showing last revision's mitre;
+    * a changed STOREY row (elevation, height) moves everything on it, so
+      it brings its own storey's elements too.
+
+    ``None`` means «cannot tell»: the caller rebuilds everything.
     """
     import json
 
@@ -202,6 +213,7 @@ def changed_element_ids(before_payload, building):
     was = {str(e.get("id")): e
            for e in (before_payload.get("elements") or ())}
     ids: set = set()
+    story_changed = _story_rows_differ(before_payload, building)
 
     def row_key(row):
         return (str(row.get("type")), str(row.get("story_id")),
@@ -213,12 +225,41 @@ def changed_element_ids(before_payload, building):
         old = was.pop(eid, None)
         if old is None or row_key(old) != row_key(element):
             ids.add(eid)
+            if str(element.get("type")) == "wall":
+                # A wall's geometry is its join with its neighbours.
+                ids.update(str(other.get("id"))
+                           for other in building.elements
+                           if str(other.get("story_id"))
+                           == str(element.get("story_id")))
     ids.update(was)                             # removed elements
+    if story_changed:
+        ids.update(str(e.get("id")) for e in building.elements)
     for element in building.elements:
         host = str((element.get("params") or {}).get("host_wall_id") or "")
         if host and host in ids:
             ids.add(str(element.get("id")))
     return ids
+
+
+def _story_rows_differ(before_payload, building) -> bool:
+    """Whether a storey's own row (elevation, height, name) moved.
+
+    Storeys carry no geometry of their own, but every element on one is
+    placed BY it: an elevation change moves the whole floor, and a diff
+    that only compared elements would rebuild nothing at all.
+    """
+    import json
+
+    was = {str(s.get("id")): s
+           for s in (before_payload.get("stories") or ())}
+    for story in building.stories:
+        old = was.pop(str(story.get("id")), None)
+        if old is None:
+            return True
+        if json.dumps(old, sort_keys=True, default=str) != \
+                json.dumps(story, sort_keys=True, default=str):
+            return True
+    return bool(was)            # a storey was removed
 
 
 def commit(history, command: BuildingEdit) -> None:

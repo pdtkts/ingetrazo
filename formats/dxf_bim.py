@@ -58,6 +58,35 @@ def _try_ezdxf():
         return None
 
 
+#: AutoCAD's own lineweight ladder, in 1/100 mm. A file states one of
+#: these or the reader picks for us.
+_DXF_LINEWEIGHTS = (0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70,
+                    80, 90, 100, 106, 120, 140, 158, 200, 211)
+
+
+def _nearest_dxf_lineweight(width_mm: float) -> int:
+    """The lineweight a receiving CAD can actually draw, nearest to ours.
+
+    The ladder is read from ezdxf rather than kept here: it is the SAME
+    table the writer snaps to on assignment, so a pen of 0.75 mm becomes
+    the 0.80 the file will state instead of a number the writer quietly
+    rounds behind our back (measured: 0.75 → 0.80, never 0.70).
+    """
+    wanted = max(0, int(round(float(width_mm) * 100.0)))
+    try:
+        from ezdxf.lldxf import const
+
+        ladder = sorted(int(v) for v in const.VALID_DXF_LINEWEIGHTS)
+    except Exception:                              # noqa: BLE001 — fallback
+        ladder = list(_DXF_LINEWEIGHTS)
+    up = [w for w in ladder if w >= wanted]
+    down = [w for w in ladder if w <= wanted]
+    # The writer's own rule: the next weight UP where one exists (a pen
+    # must never come out thinner than the office asked for), else the
+    # heaviest there is.
+    return int(up[0] if up else (down[-1] if down else 0))
+
+
 def _dxf_linetype_pattern(name: str) -> list:
     """The app's ``(dash, gap, …)`` pairs as a DXF pattern.
 
@@ -90,8 +119,11 @@ def _ensure_layer(doc, name: str, color: int, lineweight: float,
     else:
         layer = doc.layers.get(name)
     layer.color = int(color)
-    # ezdxf takes lineweight in 1/100 mm.
-    layer.dxf.lineweight = int(round(lineweight * 100))
+    # ezdxf takes lineweight in 1/100 mm, and AutoCAD accepts only a fixed
+    # ladder of them: a pen of 0.75 mm has to be written as the nearest
+    # weight the receiving CAD HAS (0.80), or it silently snaps to one
+    # anyway and the office cannot tell which of the two it got.
+    layer.dxf.lineweight = _nearest_dxf_lineweight(lineweight)
     if linetype and linetype != "CONTINUOUS":
         # The pattern is part of the office's table now, so the linetype
         # is DEFINED here (scaled per mm, as AutoCAD's own are) instead of
@@ -303,20 +335,32 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
 def _pattern_definition(families) -> list:
     """The DXF pattern definition of the pattern table's own families.
 
-    A definition line is ``(angle_deg, x0, y0, dx, dy, dashes)`` in the
-    pattern's units; the table's families are already ``(angle, spacing,
-    offset, dash)`` in millimetres, so each becomes one line starting at
-    the family's own offset with the dash run in ``dashes``. An empty
-    material falls back to the table's neutral hatch, so a cut is never
-    left as a hole.
+    A DXF definition line is ``[angle, base_point, offset, dashes]`` where
+    each element is measured ALONG and ACROSS the family's own direction
+    (the line is rotated by ``angle`` first), and the dashes are lengths:
+    POSITIVE for ink, NEGATIVE for a gap, never a bare positive pair —
+    AutoCAD reads a gap as ink and draws a solid line over the whole area,
+    which is how a hatched wall came out as a black box.
+
+    The table states ``(angle, spacing_mm, offset_mm, dash_mm)`` in paper
+    millimetres: a family's spacing is what separates its own parallel
+    lines, so it goes on the ACROSS axis (``dy``), and the family's lateral
+    shift — what interleaves two families into a brick look — travels
+    ALONG the line (``dx``). Both are paper distances, and a hatch is a
+    drawing convention, so the same wall hatches the same at 1:50 and at
+    1:100 in the file the receiving CAD regenerates.
     """
     lines: list = []
     for angle, spacing, offset, dash in families:
-        # [angle, base_point, offset, dash_length_items] — the offset is
-        # the family's own lateral shift (what interleaves two families).
-        dashes = [float(dash) * 0.6, float(dash) * 0.4] if dash else []
-        lines.append([float(angle), (float(offset), 0.0),
-                      (0.0, float(spacing)), dashes])
+        across = float(spacing) or 0.0
+        if across <= 0.0:
+            across = 1.0            # a zero gap is a division by zero to CAD
+        along = float(offset) or 0.0
+        dashes: list = []
+        if dash:
+            run = abs(float(dash))
+            dashes = [run, -run]
+        lines.append([float(angle), (0.0, 0.0), (along, across), dashes])
     return lines
 
 
