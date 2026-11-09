@@ -206,7 +206,7 @@ def build_column(building, element) -> tuple[Mesh, dict]:
             raise ValueError("Kích thước cột phải dương.")
         self_frame = Frame((float(center[0]), float(center[1]), z),
                            (math.cos(angle), math.sin(angle), 0.0),
-                           (0.0, 1.0, 0.0))
+                           (0.0, 0.0, 1.0))
         add_box(mesh, self_frame, -w / 2.0, 0.0, -d / 2.0,
                 w / 2.0, height, d / 2.0)
         area = w * d
@@ -377,6 +377,12 @@ def build(building, element):
     builder = BUILDERS.get(kind)
     if builder is None:
         builder = _EXTRA_BUILDERS.get(kind)
+    if builder is None and not _EXTRAS_LOADED[0]:
+        # The opening/roof/stair/fixture builders live apart (extras.py) and
+        # register themselves on import; import them once, on first need.
+        _EXTRAS_LOADED[0] = True
+        from core.building import extras  # noqa: F401
+        builder = _EXTRA_BUILDERS.get(kind)
     if builder is None:
         raise ValueError(f"Chưa có bộ dựng hình cho '{kind}'.")
     if kind == "wall":
@@ -418,3 +424,7 @@ _EXTRA_BUILDERS: dict = {}
 def register_builder(kind: str, builder) -> None:
     """Let an element module add its own builder to the dispatch."""
     _EXTRA_BUILDERS[str(kind)] = builder
+
+
+#: Whether the optional builders (extras.py) have been imported yet.
+_EXTRAS_LOADED = [False]

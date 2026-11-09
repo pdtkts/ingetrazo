@@ -229,3 +229,221 @@ def save_ifc(scene, path, project_name: str = "IngeTrazo project") -> int:
     Path(path).write_text(header + "\n".join(w.lines) + "\n" + footer,
                           encoding="ascii")
     return len(element_ids)
+
+# ---- the parametric building -------------------------------------------------
+# ``save_ifc`` above exports TAGGED freeform geometry: the tag is the opt-in.
+# A parametric building is different — every element is already a BIM object,
+# so the writer reads the model itself: one storey per level (not one hardcoded
+# storey at 0), one product per element in ITS storey, openings tied to their
+# host wall with IfcRelVoidsElement, rooms as IfcSpace, and the quantities the
+# element builders computed (``derived``) written straight in.
+
+#: Quantity key -> (IFC entity, unit name). Keyed on the suffix the builders
+#: write, so ``net_area_m2`` bills as an area and ``volume_m3`` as a volume
+#: without a per-class table here.
+_Q_OF_KEY = (
+    ("_area_m2", "IFCQUANTITYAREA", "Area"),
+    ("_volume_m3", "IFCQUANTITYVOLUME", "Volume"),
+    ("_length_mm", "IFCQUANTITYLENGTH", "Length"),
+    ("_height_mm", "IFCQUANTITYLENGTH", "Height"),
+    ("_top_mm", "IFCQUANTITYLENGTH", "Height"),
+    ("_count", "IFCQUANTITYCOUNT", "Count"),
+)
+
+#: The named quantity each built key bills under, in the reader's vocabulary.
+_Q_NAMES = {
+    "net_area_m2": ("IFCQUANTITYAREA", "NetSideArea"),
+    "gross_area_m2": ("IFCQUANTITYAREA", "GrossSideArea"),
+    "area_m2": ("IFCQUANTITYAREA", "GrossArea"),
+    "volume_m3": ("IFCQUANTITYVOLUME", "NetVolume"),
+    "length_mm": ("IFCQUANTITYLENGTH", "Length"),
+    "effective_height_mm": ("IFCQUANTITYLENGTH", "Height"),
+    "effective_top_mm": ("IFCQUANTITYLENGTH", "Height"),
+}
+
+#: Element kinds whose product is a void-forming opening inside a host.
+_OPENING_KINDS = ("door", "window", "curtain_wall")
+
+
+def _qset_name(ifc_class: str) -> str:
+    """The Qto_* set the quantities belong to, per class."""
+    base = ifc_class[3:] if ifc_class.startswith("Ifc") else ifc_class
+    return f"Qto_{base}BaseQuantities"
+
+
+def _quantity_entities(w, derived) -> list:
+    """``[#id, ...]`` — the IFCQUANTITY* for the element's built numbers."""
+    out = []
+    for key, (entity, name) in _Q_NAMES.items():
+        value = (derived or {}).get(key)
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        out.append(w.add(entity, _s(name), "$", "$", _f(number), "$"))
+    return out
+
+
+def save_building_ifc(scene, path, building=None, project_name: str = "") -> int:
+    """Write the parametric building to ``path`` as IFC4. Returns the element
+    count; raises ``ValueError`` when the building has nothing to export."""
+    from core.building import builder as builders
+    from core.building import elements as schemas
+    from core.building import model as building_model
+    from core.building.scene_sync import group_for
+
+    building = building or building_model.building_of(scene)
+    if not building.elements and not building.stories:
+        raise ValueError("Không có cấu kiện BIM nào để xuất.")
+
+    name = str(project_name or building.project.get("name")
+               or "IngeTrazo project")
+    w = _Writer()
+    origin = w.add("IFCCARTESIANPOINT", "(0.,0.,0.)")
+    axis = w.add("IFCAXIS2PLACEMENT3D", f"#{origin}", "$", "$")
+    context = w.add("IFCGEOMETRICREPRESENTATIONCONTEXT",
+                    "$", "'Model'", "3", "1.E-5", f"#{axis}", "$")
+    units = [
+        w.add("IFCSIUNIT", "*", ".LENGTHUNIT.", "$", ".METRE."),
+        w.add("IFCSIUNIT", "*", ".AREAUNIT.", "$", ".SQUARE_METRE."),
+        w.add("IFCSIUNIT", "*", ".VOLUMEUNIT.", "$", ".CUBIC_METRE."),
+    ]
+    unit_assign = w.add("IFCUNITASSIGNMENT",
+                        "(" + ",".join(f"#{u}" for u in units) + ")")
+    project = w.add("IFCPROJECT", _s(ifc_guid()), "$", _s(name),
+                    "$", "$", "$", "$", f"(#{context})", f"#{unit_assign}")
+    placement = w.add("IFCLOCALPLACEMENT", "$", f"#{axis}")
+    site = w.add("IFCSITE", _s(ifc_guid()), "$", "'Site'", "$", "$",
+                 f"#{placement}", "$", "$", ".ELEMENT.",
+                 "$", "$", "$", "$", "$")
+    building_id = w.add("IFCBUILDING", _s(ifc_guid()), "$", "'Building'", "$",
+                        "$", f"#{placement}", "$", "$", ".ELEMENT.",
+                        "$", "$", "$")
+    w.add("IFCRELAGGREGATES", _s(ifc_guid()), "$", "$", "$",
+          f"#{project}", f"(#{site})")
+    w.add("IFCRELAGGREGATES", _s(ifc_guid()), "$", "$", "$",
+          f"#{site}", f"(#{building_id})")
+
+    # One storey per level, at its real elevation (metres).
+    storey_ids: dict = {}
+    for story in building.stories:
+        z_m = float(story.get("z_mm", 0.0)) / 1000.0
+        at = w.add("IFCCARTESIANPOINT", f"(0.,0.,{_f(z_m)})")
+        spot = w.add("IFCAXIS2PLACEMENT3D", f"#{at}", "$", "$")
+        place = w.add("IFCLOCALPLACEMENT", f"#{placement}", f"#{spot}")
+        storey_ids[str(story["id"])] = w.add(
+            "IFCBUILDINGSTOREY", _s(ifc_guid()), "$",
+            _s(str(story.get("name") or "")), "$", "$", f"#{place}",
+            "$", "$", ".ELEMENT.", _f(z_m))
+    w.add("IFCRELAGGREGATES", _s(ifc_guid()), "$", "$", "$",
+          f"#{building_id}",
+          "(" + ",".join(f"#{s}" for s in storey_ids.values()) + ")")
+
+    by_storey: dict = {sid: [] for sid in storey_ids}
+    products: dict = {}
+    openings_by_host: dict = {}
+    made = 0
+    for element in building.elements:
+        kind = str(element.get("type") or "")
+        story_id = str(element.get("story_id") or "")
+        if story_id not in storey_ids:
+            continue
+        derived = element.get("derived") or {}
+        try:
+            mesh, computed = builders.build(building, element)
+            derived = {**(computed or {}), **derived}
+        except ValueError:
+            mesh = None
+        group = group_for(scene, str(element["id"]))
+        faces = list(mesh.faces) if mesh is not None and mesh.faces else (
+            list(group.mesh.faces) if group is not None else [])
+        ifc_class = schemas.IFC_CLASS_OF.get(kind, "IfcBuildingElementProxy")
+        if kind == "zone":
+            ifc_class = "IfcSpace"
+        label = str((element.get("params") or {}).get("name") or
+                    ifc_class)
+        if len(faces) < 3:
+            # An area-only element (a room) still has a place in the model:
+            # export it without geometry rather than dropping the room.
+            if kind != "zone":
+                continue
+            pds = "$"
+        else:
+            rep = _brep(w, faces, context)
+            pds = f"#{w.add('IFCPRODUCTDEFINITIONSHAPE', '$', '$', f'(#{rep})')}"
+        total = _ATTR_COUNT.get(ifc_class, _DEFAULT_ATTRS)
+        attrs = [_s(ifc_guid()), "$", _s(label), "$", "$",
+                 f"#{placement}", pds, "'IngeTrazo'"]
+        if ifc_class == "IfcSpace":
+            # IfcSpace's 8th attribute is LongName (not Tag) and its 9th is
+            # CompositionType, an enumeration — a name there is a schema error.
+            attrs[7] = _s(label)
+            attrs += [".ELEMENT.", "$", "$"]
+        attrs += ["$"] * (total - len(attrs))
+        product = w.add(ifc_class.upper(), *attrs)
+        products[str(element["id"])] = (product, ifc_class)
+        by_storey[story_id].append(product)
+        made += 1
+
+        quantities = _quantity_entities(w, derived)
+        if quantities:
+            eq = w.add("IFCELEMENTQUANTITY", _s(ifc_guid()), "$",
+                       _s(_qset_name(ifc_class)), "$", "$",
+                       "(" + ",".join(f"#{q}" for q in quantities) + ")")
+            w.add("IFCRELDEFINESBYPROPERTIES", _s(ifc_guid()), "$", "$", "$",
+                  f"(#{product})", f"#{eq}")
+        if kind in _OPENING_KINDS:
+            host_id = str((element.get("params") or {}).get(
+                "host_wall_id") or "")
+            if host_id:
+                # IFC4's void relation points at an IfcOpeningElement — a
+                # feature element — never at the door itself; the door then
+                # FILLS that void. A door under IfcRelVoidsElement is a schema
+                # error, which is what a validator catches first.
+                void_attrs = [_s(ifc_guid()), "$", _s(label + " (lỗ mở)"),
+                              "$", "$", f"#{placement}",
+                              pds if pds != "$" else "$", "'IngeTrazo'",
+                              ".NOTDEFINED."]
+                void = w.add("IFCOPENINGELEMENT", *void_attrs)
+                openings_by_host.setdefault(host_id, []).append((void,
+                                                                 product))
+
+    if not made:
+        raise ValueError("Không có cấu kiện BIM nào để xuất.")
+
+    # Each wall carries the openings that pierce it: the opening products are
+    # aggregated under the wall and a void relation says what they cut.
+    for host_id, openings in openings_by_host.items():
+        host = products.get(str(host_id))
+        if host is None:
+            continue
+        host_product = host[0]
+        for void, filler in openings:
+            w.add("IFCRELVOIDSELEMENT", _s(ifc_guid()), "$", "$", "$",
+                  f"#{host_product}", f"#{void}")
+            w.add("IFCRELFILLSELEMENT", _s(ifc_guid()), "$", "$", "$",
+                  f"#{void}", f"#{filler}")
+
+    for story_id, ids in by_storey.items():
+        if not ids:
+            continue
+        w.add("IFCRELCONTAINEDINSPATIALSTRUCTURE", _s(ifc_guid()), "$",
+              "$", "$", "(" + ",".join(f"#{i}" for i in ids) + ")",
+              f"#{storey_ids[story_id]}")
+
+    stamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    file_name = Path(path).name.replace("'", "''")
+    header = (
+        "ISO-10303-21;\n"
+        "HEADER;\n"
+        "FILE_DESCRIPTION((''),'2;1');\n"
+        f"FILE_NAME('{file_name}','{stamp}',('IngeTrazo'),('IngeTrazo'),"
+        "'IngeTrazo','IngeTrazo','');\n"
+        "FILE_SCHEMA(('IFC4'));\n"
+        "ENDSEC;\n"
+        "DATA;\n"
+    )
+    footer = "ENDSEC;\nEND-ISO-10303-21;\n"
+    Path(path).write_text(header + "\n".join(w.lines) + "\n" + footer,
+                          encoding="ascii")
+    return made
