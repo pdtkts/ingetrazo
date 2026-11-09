@@ -3095,6 +3095,14 @@ class MainWindow(QMainWindow):
         pens_action.triggered.connect(self._on_manage_pens)
         menu.addAction(pens_action)
 
+        office_action = QAction(tr("Văn phòng…"), self)
+        office_action.setStatusTip(tr(
+            "Thư mục văn phòng chia sẻ: bảng bút, tên lớp, danh mục chi "
+            "tiết và số liệu khung tên mà mọi máy trong văn phòng dùng "
+            "chung — đặt một lần, mọi người giống nhau."))
+        office_action.triggered.connect(self._on_office)
+        menu.addAction(office_action)
+
     # ---- BIM menu actions ---------------------------------------------------
 
     def _bim_building(self):
@@ -3239,6 +3247,24 @@ class MainWindow(QMainWindow):
             % (made["name"], str(getattr(sheet, "name", "")),
                int(made["scale"])))
 
+    def _apply_office_defaults(self, scene) -> None:
+        """Stamp the office's tables on a NEW document.
+
+        Called when a document is started, never when one is opened: an
+        office that changes its pen table must not silently restyle last
+        year's drawings, which are a record of what was issued.
+        """
+        try:
+            from core.building.office import Office
+
+            applied = Office.from_settings().apply_to(scene)
+        except Exception:                            # noqa: BLE001 — optional
+            return
+        if applied:
+            self.statusBar().showMessage(
+                tr("Đã áp bảng của văn phòng: %s")
+                % ", ".join(sorted(applied)), 5000)
+
     def _on_build_sample(self, key: str) -> None:
         """Dựng nhanh 3D: a whole parametric house in one command.
 
@@ -3276,6 +3302,12 @@ class MainWindow(QMainWindow):
                counts["openings"],
                counts["storeys"] + counts["walls"] + counts["openings"]
                + counts.get("counters", 0)), 6000)
+
+    def _on_office(self) -> None:
+        """Văn phòng: the shared folder the whole office reads from."""
+        from views.office_dialog import open_office
+
+        open_office(self)
 
     def _on_edit_grid(self) -> None:
         """Trục: the storey's grid, as a model element the sheets read."""
@@ -6992,6 +7024,9 @@ class MainWindow(QMainWindow):
         self._reset_camera_home()
         self._apply_new_document_units()
         self._insert_scale_figure()
+        # The office's own tables, on a NEW document only — never on an
+        # opened one, which is a record of what was issued.
+        self._apply_office_defaults(self.viewport.scene)
         self.viewport.notify_scene_changed()
         self._sync_style_menu()
         self._sync_section_menu()
