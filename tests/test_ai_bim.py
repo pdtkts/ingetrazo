@@ -116,7 +116,11 @@ def test_the_agent_can_issue_the_drawing_set_and_read_a_rule(bridge):
     _bim(bridge, "room", story_id=story["id"], name="P",
          outline_mm=[[0, 0], [6000, 0], [6000, 4000], [0, 4000]])
     sheets = _bim(bridge, "docset")
-    assert len(sheets) >= 10
+    # The house has one storey, so it issues the four plans of that storey
+    # plus the cover and the index — and NOT a blank sheet for every trade
+    # it does not have (no column, beam, stair, door or fixture here).
+    assert any("Mặt bằng — Tầng 1" in name for name in sheets)
+    assert len(sheets) >= 8
     rule = _bim(bridge, "drawings", kind="story", story_id=story["id"])
     assert rule["kind"] == "story"
     assert rule["views"]                       # the +1200 cut is in there
