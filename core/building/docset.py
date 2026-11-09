@@ -139,7 +139,8 @@ def generate_docset(scene, building, project=None, story_ids=None,
         return result
 
     made = _sheets.ensure_sheets(scene, building, project, ids, paper=paper,
-                                 landscape=landscape)
+                                 landscape=landscape, elevations=elevations,
+                                 sections=sections)
     by_name = {str(s.name): s for s in made}
     total = max(len(made), 1)
     done = 0

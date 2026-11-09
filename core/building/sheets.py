@@ -96,7 +96,12 @@ def _has_trade(building, kinds) -> bool:
     return any(str(e.get("type")) in kinds for e in building.elements)
 
 
-def sheet_plan(building, story_ids=None) -> list:
+#: The groups a set may be asked to leave out — the caller's own switch.
+OPTIONAL_GROUPS = {"elev": "elevations", "sect": "sections"}
+
+
+def sheet_plan(building, story_ids=None, *, elevations: bool = True,
+               sections: bool = True) -> list:
     """The drawing set a building is issued under, in order.
 
     ``story_ids`` limits the per-storey sheets (the three-storey townhouse
@@ -110,7 +115,11 @@ def sheet_plan(building, story_ids=None) -> list:
                {str(i) for i in story_ids}]
     out: list = []
     counters: dict = {}
+    requested = {"elevations": bool(elevations), "sections": bool(sections)}
     for group, label, per_storey in GROUPS:
+        switch = OPTIONAL_GROUPS.get(group)
+        if switch is not None and not requested[switch]:
+            continue
         if per_storey:
             if group == "plan" and not stories:
                 continue
@@ -187,7 +196,8 @@ def title_block(sheet: Composicion, project: dict, spec: SheetSpec,
 
 
 def ensure_sheets(scene, building, project=None, story_ids=None,
-                  paper: str = "A3", landscape: bool = True) -> list:
+                  paper: str = "A3", landscape: bool = True, *,
+                  elevations: bool = True, sections: bool = True) -> list:
     """Create (or find) the sheets of the project's drawing set.
 
     Returns the ``Composicion`` objects in issue order. An existing sheet with
@@ -195,7 +205,8 @@ def ensure_sheets(scene, building, project=None, story_ids=None,
     duplicating it — the behaviour a re-issue needs.
     """
     project = dict(project or building.project or {})
-    specs = sheet_plan(building, story_ids)
+    specs = sheet_plan(building, story_ids, elevations=elevations,
+                       sections=sections)
     by_name = {str(c.name): c for c in scene.compositions}
     made: list = []
     for index, spec in enumerate(specs, start=1):
