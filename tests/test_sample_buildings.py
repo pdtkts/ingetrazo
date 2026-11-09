@@ -140,3 +140,54 @@ def test_the_menu_builds_a_sample_into_the_document():
     assert win.viewport.scene.groups, "mẫu phải hiện trong 3D"
     assert "Đã dựng" in win.statusBar().currentMessage()
     win.hide()
+
+
+def test_every_preset_builds_every_element_it_declares():
+    """A preset that adds an element the builder then refuses is worse than
+    one that omits it: the model has a hole where the drawing office
+    promised a glazed run, and the panel warns for the life of the
+    document. The office preset's curtain wall was exactly that — given a
+    baseline of its own and no host wall, so `build_curtain_wall` raised
+    «Lỗ mở không có tường chủ» and nothing was drawn."""
+    from core.building import samples as _samples
+    from core.building.model import building_of
+    from core.building.scene_sync import group_for
+
+    from core.history import History
+    from core.scene import Scene
+
+    for key in _samples.keys():
+        scene = Scene()
+        building, counts = _samples.build_sample(History(scene), scene, key)
+        assert not scene.building_errors, (key, scene.building_errors)
+        for element in building.elements:
+            kind = str(element.get("type"))
+            if kind == "zone":
+                continue        # an area: it draws nothing by design
+            assert group_for(scene, element["id"]) is not None, \
+                f"{key}: «{kind}» {element['id']} không dựng được"
+        assert counts
+
+
+def test_the_office_curtain_wall_is_a_glazed_run_in_its_front_wall():
+    """The preset asks for a glazed run along the front: it must BE one —
+    hosted by the front wall, with the area the schedule prices."""
+    from core.building import samples as _samples
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    building, _counts = _samples.build_sample(History(scene), scene, "office")
+    curtain = next(e for e in building.elements
+                   if e.get("type") == "curtain_wall")
+    params = curtain["params"]
+
+    assert params.get("host_wall_id"), "vách kính không có tường chủ"
+    host = building.element(str(params["host_wall_id"]))
+    assert host is not None and host.get("type") == "wall"
+    assert params["width_mm"] > 1000.0
+    assert params["sill_height_mm"] > 0.0
+
+    derived = curtain.get("derived") or {}
+    assert derived.get("glass_area_m2", 0.0) > 0.0
+    assert derived.get("cells", 0) >= 2

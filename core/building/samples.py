@@ -174,13 +174,28 @@ def build_sample(history, scene, key: str, *, material: str = "gach"):
             counts["walls"] += 1
         del back, right
 
-        if record.get("curtain_wall_mm") and i == 0:
+        if record.get("curtain_wall_mm") and i == 0 and front is not None:
+            # A curtain wall lives INSIDE a host wall, exactly as a door
+            # does — its glazed grid is built in the host's frame. The
+            # preset used to give it a baseline of its own and no host, so
+            # it never built at all: the geometry was missing and the
+            # panel warned «Lỗ mở không có tường chủ» for the life of the
+            # document.
+            fparams = front.get("params") or {}
+            fa = fparams.get("baseline_start_mm") or [0.0, 0.0]
+            fb = fparams.get("baseline_end_mm") or [0.0, 0.0]
+            flength = ((float(fb[0]) - float(fa[0])) ** 2
+                       + (float(fb[1]) - float(fa[1])) ** 2) ** 0.5
+            run_width = min(float(record["curtain_wall_mm"]), flength - 1000.0)
             run(bim_commands.add_element("curtain_wall", st["id"], {
-                "baseline_start_mm": [2000.0, 0.0],
-                "baseline_end_mm": [2000.0 + float(record["curtain_wall_mm"]),
-                                    0.0],
-                "thickness_mm": 100.0, "height_mm": height - 600.0,
-                "frame_depth_mm": 100.0}, rebuild=rebuild))
+                "host_wall_id": str(front["id"]),
+                "offset_along_wall_mm": round(
+                    (flength - run_width) / 2.0, 1),
+                "width_mm": round(run_width, 1),
+                "height_mm": height - 600.0,
+                "sill_height_mm": 600.0,
+                "frame_depth_mm": 100.0,
+                "name": f"VK{counts.get('curtain', 0) + 1}"}, rebuild=rebuild))
             counts["curtain"] = counts.get("curtain", 0) + 1
 
     if str(record.get("roof")) == "flat":
