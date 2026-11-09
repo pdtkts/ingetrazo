@@ -228,6 +228,8 @@ class BuildingPanel(QWidget):
             if key in _HIDDEN_KEYS:
                 continue
             value = params.get(key, defaults.get(key))
+            if str(key) in _CARRIED_KEYS and value is None:
+                continue
             widget = self._widget_for(key, value)
             if widget is None:
                 continue
@@ -253,6 +255,11 @@ class BuildingPanel(QWidget):
         self._forms["material"].addRow(label)
 
     def _widget_for(self, key: str, value):
+        if key == "steel_section":
+            # A rolled section is PICKED from the catalogue, never typed:
+            # «H300x150x6.5x9» is four dimensions and a mass, and a text
+            # field would let a user invent a section nobody rolls.
+            return self._steel_widget(value)
         if isinstance(value, bool):
             box = QComboBox()
             box.addItems([tr("No"), tr("Yes")])
@@ -274,6 +281,64 @@ class BuildingPanel(QWidget):
             return spin
         return None                        # lists (outlines, panels) are
         # drawn with the tools, not typed in a form.
+
+    def _steel_widget(self, value):
+        """The catalogue as a grouped list, plus the way back to concrete.
+
+        Choosing a name writes the SECTION's own dimensions as well — the
+        user asked for the section, not for a 300×150 rectangle with the
+        thicknesses left out.
+        """
+        from core.building import steel as _steel
+
+        box = QComboBox()
+        box.addItem(tr("(không dùng thép hình)"), "")
+        for letter, names in _steel.families().items():
+            for name in names:
+                record = _steel.by_name(name) or (0.0, 0.0, 0.0, 0.0, 0.0)
+                box.addItem(f"{name}   ·   {record[4]:g} kg/m", name)
+        current = str(value or "")
+        at = box.findData(current)
+        box.setCurrentIndex(max(at, 0))
+        box.currentIndexChanged.connect(
+            lambda _i, k="steel_section", b=box: self._on_steel(k, b))
+        return box
+
+    def _on_steel(self, key: str, box) -> None:
+        """A chosen section writes its OWN dimensions, in one undo step."""
+        from core.building import commands as _commands
+        from core.building import steel as _steel
+
+        # Building the form sets the combo's index, which EMITS the change
+        # — the same trap ``_on_field`` guards. Without this, every refresh
+        # re-applied whatever the picker happened to be showing, so a
+        # second section could never be chosen: the first write was undone
+        # by the rebuild's own signal.
+        if self._loading:
+            return
+        element = self._current_element()
+        if element is None:
+            return
+        name = str(box.currentData() or "")
+        values = {str(key): name}
+        if name:
+            values.update(_steel.adopt({}, name))
+            values.pop("building_material_id", None)   # not what was asked
+        else:
+            values.update({"steel_web_mm": None, "steel_flange_mm": None})
+        history = self._window.viewport.history
+        command = _commands.set_params(str(element["id"]), values)
+        command._rebuild = lambda s, b: sync(s, b)
+        history.execute(command)
+        if history.last_error:
+            self.hint.setText(str(history.last_error))
+            return
+        self.hint.setText(
+            tr("Đã lấy tiết diện %s: %g kg/m.") % (name,
+                                                 _steel.mass_per_m(name))
+            if name else tr("Đã bỏ tiết diện thép hình."))
+        self.refresh()
+        self._window.viewport.notify_scene_changed()
 
     def _on_bulk_apply(self) -> None:
         """Apply THIS element's current parameters to every same-kind
@@ -433,10 +498,18 @@ class BuildingPanel(QWidget):
 
 #: Parameters shown in the form even when not part of the type's defaults
 #: (they belong to the element's identity once set).
-_EXTRA_KEYS = ("name", "derived", "host_wall_id")
+#: Parameters the panel shows although the type's schema does not carry
+#: them: a value the user can set on THIS element (a steel section is
+#: chosen per member), which the schema leaves out because it is not what
+#: the type is BY DEFAULT.
+_EXTRA_KEYS = ("name", "derived", "host_wall_id", "steel_section")
 
 #: Never shown as an editable field.
 _HIDDEN_KEYS = ("derived", "host_wall_id")
+
+#: Shown only when the element actually carries the value — the web and
+#: flange thicknesses of a chosen section are the table's, not the user's.
+_CARRIED_KEYS = ("steel_web_mm", "steel_flange_mm")
 
 #: Extra field labels that are not plain parameter ids.
 _EXTRA_LABELS = {"name": "Name"}

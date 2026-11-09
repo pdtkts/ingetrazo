@@ -42,8 +42,16 @@ HEADERS = {
               "Khối tích (m³)"),
     "slabs": ("Tầng", "Vật liệu", "Dày (mm)", "Diện tích (m²)",
               "Thể tích (m³)"),
-    "columns": ("Tầng", "Mã", "Tiết diện", "Số lượng", "Thể tích (m³)"),
-    "beams": ("Tầng", "Mã", "Tiết diện (b x h)", "Số lượng", "Dài (m)"),
+    # A column and a beam state the same five things plus their LENGTH —
+    # and a steel member its MASS, which the row carries only when the
+    # member came off the rolled-section table. The mass column is
+    # declared here because the header list is the table's contract with
+    # the spreadsheet that receives it, and a column that appears without
+    # being declared breaks every reader that maps by position.
+    "columns": ("Tầng", "Mã", "Tiết diện", "Số lượng", "Thể tích (m³)",
+                "Dài (m)", "KL (kg)"),
+    "beams": ("Tầng", "Mã", "Tiết diện (b x h)", "Số lượng", "Dài (m)",
+              "KL (kg)"),
 }
 
 #: Element type → the opening label its rows carry.
@@ -178,7 +186,8 @@ def _columns(building, derived):
 
 def _beams(building, derived):
     return _marked(building, derived, "beam", prefix="DM",
-                   section=lambda p: (f"{round(float(p.get('width_mm', 0)))}"
+                   section=lambda p: (_steel_name(p) or
+                                      f"{round(float(p.get('width_mm', 0)))}"
                                       f"x{round(float(p.get('depth_mm', 0)))}"))
 
 
@@ -220,21 +229,49 @@ def _marked(building, derived, kind, prefix, section):
             row["Tiết diện (b x h)"] = sec
         else:
             row["Tiết diện"] = sec
+        # Every DECLARED column is written, blank when it does not apply:
+        # the header list is the table's contract with the spreadsheet,
+        # which maps by position, so a row missing a key would shift every
+        # column after it.
+        length_m = sum(
+            _num(derived, e, "length_mm") for e in info["elements"]) / 1000.0
+        row.setdefault("Dài (m)", round(length_m, 2))
+        row.setdefault("KL (kg)", "")
         if kind == "column":
             row["Thể tích (m³)"] = round(
                 sum(_num(derived, e, "volume_m3") for e in info["elements"]),
                 3)
-        else:
-            row["Dài (m)"] = round(
-                sum(_num(derived, e, "length_mm") for e in info["elements"])
-                / 1000.0, 2)
+        # A steel member is billed by MASS: the section's own kg/m is what
+        # the estimator orders from, and it is the one number a rolled
+        # section carries that the geometry does not.
+        steel = _steel_name(info["elements"][0].get("params") or {})
+        if steel:
+            from core.building import steel as _steel
+
+            per_m = _steel.mass_per_m(steel)
+            if per_m:
+                row["KL (kg)"] = round(length_m * per_m, 2)
         rows.append(row)
     return sorted(rows, key=lambda r: (r["Tầng"], r["Mã"]))
+
+
+def _steel_name(params) -> str:
+    """The catalogue name of a steel member, or ``""``.
+
+    A rolled section is ordered BY NAME — the flange and web thicknesses
+    are the design, and ``200x100`` has thrown them away. When the element
+    came off the steel table its own name is stated in the schedule, which
+    is what the fabricator reads.
+    """
+    return str(params.get("steel_section") or "")
 
 
 def _column_section(params) -> str:
     if params.get("shape") == "round":
         return f"D{round(float(params.get('diameter_mm', 0.0) or 0.0))}"
+    steel = _steel_name(params)
+    if steel:
+        return steel
     w = round(float(params.get("width_mm", 0.0) or 0.0))
     d = round(float(params.get("depth_mm", 0.0) or 0.0))
     return f"{min(w, d)}x{max(w, d)}" if w != d else f"{w}x{d}"

@@ -99,13 +99,15 @@ def test_the_material_tab_names_the_material_behind_the_code(panel):
     wall = next(e for e in building_of(panel._window.viewport.scene).elements
                 if e.get("type") == "wall")
     _pick(panel, wall["id"])
+    # The note is a row's own VALUE (it has no field to sit beside).
     texts = []
     form = panel._forms["material"]
     for row in range(form.rowCount()):
-        item = form.itemAt(row, form.ItemRole.LabelRole)
-        widget = item.widget() if item is not None else None
-        if widget is not None and hasattr(widget, "text"):
-            texts.append(str(widget.text()))
+        for role in (form.ItemRole.LabelRole, form.ItemRole.FieldRole):
+            item = form.itemAt(row, role)
+            widget = item.widget() if item is not None else None
+            if widget is not None and hasattr(widget, "text"):
+                texts.append(str(widget.text()))
     assert any("Gạch xây" in text for text in texts), texts
 
 
