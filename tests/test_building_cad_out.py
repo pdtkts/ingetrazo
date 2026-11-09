@@ -237,3 +237,36 @@ def test_a_dxf_carries_the_drawing_s_annotations_and_no_others(tmp_path):
              if e.dxftype() == "TEXT"]
     assert 0 < len(texts) < len(scene.text_labels), \
         f"DXF mang chú thích của cả hai tầng: {len(texts)}/{len(scene.text_labels)}"
+
+
+def test_the_cut_hatch_is_a_pattern_the_cad_regenerates(tmp_path):
+    """The pattern table (core.building.patterns) is geometry for the
+    drawings; writing it as a PATTERN definition rather than thousands of
+    anonymous lines is what makes a receiving CAD able to redraw it at any
+    zoom — and what makes the table anything but dead code."""
+    import ezdxf
+    from core.building.commands import add_element, add_story
+    from core.building.scene_sync import sync
+    from core.history import History
+    from formats.dxf_bim import save_plan_dxf
+
+    from core.scene import Scene
+
+    scene = Scene()
+    history = History(scene)
+    history.execute(add_story("T1", 0.0, 3300.0))
+    from core.building.model import building_of
+
+    story = building_of(scene).stories[0]
+    history.execute(add_element("wall", story["id"], {
+        "baseline_start_mm": [0, 0], "baseline_end_mm": [6000, 0],
+        "thickness_mm": 200.0, "height_mm": 3300.0,
+        "building_material_id": "gach"}, rebuild=lambda s, b: sync(s, b)))
+    path = tmp_path / "cut.dxf"
+    save_plan_dxf(str(path), scene, building_of(scene), story["id"])
+    hatches = [e for e in ezdxf.readfile(str(path)).modelspace()
+               if e.dxftype() == "HATCH"]
+    assert hatches, "mặt cắt không có vệt"
+    hatch = hatches[0]
+    assert hatch.dxf.solid_fill == 0, "vệt cắt bị tô đặc, không phải hatch"
+    assert list(hatch.pattern.lines), "hatch không có định nghĩa để CAD vẽ lại"

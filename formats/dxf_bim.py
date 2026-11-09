@@ -77,7 +77,8 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
                      layer_map: dict | None = None,
                      with_hatch: bool = True, with_dimensions: bool = True,
                      with_text: bool = True, doc_name: str = "",
-                     annotation_key: str = "") -> dict:
+                     annotation_key: str = "",
+                     hatch_material: str = "") -> dict:
     """Write one drawing's DXF. Returns a count summary.
 
     ``view`` is a :class:`core.building.drawings.DrawingView` (its camera
@@ -149,12 +150,21 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
         lw, _ = PEN_TABLE["hatch"]
         name = mapped_layer("KT-HATCH", layer_map)
         _ensure_layer(doc, name, 8, lw)
+        # The pattern of each cut area is DERIVED here rather than written
+        # segment by segment: a HATCH carries its own definition, so the
+        # receiving CAD regenerates the lines at any zoom and the file
+        # stays a drawing instead of thousands of anonymous lines. The
+        # definition is the pattern table's own (core.building.patterns),
+        # in MILLIMETRES, which is what the file declares.
+        from core.building.patterns import families_for
         for ring in drawing.loops:
             points = [_mm((p[0], p[1])) for p in ring]
             if len(points) < 3:
                 continue
             hatch = msp.add_hatch(color=8, dxfattribs={"layer": name})
-            hatch.set_solid_fill(color=8)
+            definition = _pattern_definition(families_for(hatch_material))
+            hatch.set_pattern_fill("KT_HATCH", color=8, scale=1.0,
+                                   definition=definition)
             hatch.paths.add_polyline_path(points, is_closed=True)
             counts["hatch"] += 1
 
@@ -237,6 +247,26 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
     doc.saveas(str(path))
     counts["layers"] = len(doc.layers)
     return counts
+
+
+def _pattern_definition(families) -> list:
+    """The DXF pattern definition of the pattern table's own families.
+
+    A definition line is ``(angle_deg, x0, y0, dx, dy, dashes)`` in the
+    pattern's units; the table's families are already ``(angle, spacing,
+    offset, dash)`` in millimetres, so each becomes one line starting at
+    the family's own offset with the dash run in ``dashes``. An empty
+    material falls back to the table's neutral hatch, so a cut is never
+    left as a hole.
+    """
+    lines: list = []
+    for angle, spacing, offset, dash in families:
+        # [angle, base_point, offset, dash_length_items] — the offset is
+        # the family's own lateral shift (what interleaves two families).
+        dashes = [float(dash) * 0.6, float(dash) * 0.4] if dash else []
+        lines.append([float(angle), (float(offset), 0.0),
+                      (0.0, float(spacing)), dashes])
+    return lines
 
 
 def _owned(scene, view):
