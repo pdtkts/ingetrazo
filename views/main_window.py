@@ -5321,6 +5321,127 @@ class MainWindow(QMainWindow):
             return title
         return key.replace("_", " ").strip().capitalize() or tr("Extension")
 
+    def _bim_selection(self, selection) -> list:
+        """The building elements under a viewport selection.
+
+        The 3D knows groups; the building knows elements. They are joined
+        by ``scene_sync``'s own key (a group carries its element's id), so
+        a selection of a wall's body resolves to the wall by the SAME
+        mapping the rebuild uses — never by name.
+        """
+        from core.building import model as _model
+        from core.building.scene_sync import EXT_KEY
+
+        found: list = []
+        keys: set = set()
+        for entity in selection:
+            ext = getattr(entity, "ext", None)
+            if not isinstance(ext, dict):
+                continue
+            eid = str((ext.get(EXT_KEY) or {}).get("id") or "")
+            if eid and eid not in keys:
+                keys.add(eid)
+                found.append(eid)
+        if not found:
+            return []
+        building = _model.building_of(self.viewport.scene)
+        return [row for row in (building.element(k) for k in found)
+                if row is not None]
+
+    def _build_bim_context_menu(self, menu, elements) -> None:
+        """The entries a BIM element gets on right-click.
+
+        Deliberately the OFFICE's questions, not the mesh's: which kind of
+        thing is this, what parameters does it carry, what is it made of,
+        and — for a host like a wall — which openings live in it. The
+        entries run the app's own commands through the building panel's
+        machinery, so they are one undo step each.
+        """
+        from core.building.scene_sync import TR_NAMES
+
+        kinds = {str(e.get("type")) for e in elements}
+        one = elements[0] if len(elements) == 1 else None
+        if one is not None:
+            label = TR_NAMES.get(str(one.get("type")), str(one.get("type")))
+            name = str((one.get("params") or {}).get("name") or "")
+            menu.addAction(tr("Sửa %s %s…") % (tr(label), name),
+                           lambda e=one: self._bim_edit_element(e.get("id")))
+        else:
+            menu.addAction(tr("Sửa %d cấu kiện…") % len(elements),
+                           self._on_show_building_panel)
+
+        if "wall" in kinds:
+            walls = [e for e in elements if str(e.get("type")) == "wall"]
+            menu.addMenu(self._bim_host_menu(menu, walls, ("door", "window")))
+        if any(str(e.get("type")) in ("column", "beam") for e in elements):
+            hosts = [e for e in elements
+                     if str(e.get("type")) in ("column", "beam")]
+            menu.addMenu(self._bim_host_menu(menu, hosts, ("beam", "slab")))
+
+        menu.addAction(tr("Chọn cùng loại trong tầng"),
+                       lambda k=kinds: self._bim_select_same_kind(k))
+        menu.addAction(tr("Đổi Loại / Vật liệu…"), self._on_show_building_panel)
+        menu.addAction(tr("Bảng thống kê tương tác…"), self._on_open_schedule)
+
+    def _bim_host_menu(self, parent, hosts, families) -> QMenu:
+        """The openings a host carries: what lives in this wall, and what
+        can be put there."""
+        from core.building import model as _model
+        from core.building.scene_sync import TR_NAMES
+
+        sub = QMenu(tr("Trong cấu kiện này"), parent)
+        building = _model.building_of(self.viewport.scene)
+        host_ids = {str(h.get("id")) for h in hosts}
+        inside = [e for e in building.elements
+                  if str((e.get("params") or {}).get("host_wall_id") or "")
+                  in host_ids]
+        if inside:
+            for element in inside[:20]:
+                label = str((element.get("params") or {}).get("name")
+                            or element.get("type"))
+                sub.addAction(tr("Chọn %s") % label,
+                              lambda e=element: self._bim_edit_element(
+                                  e.get("id")))
+        else:
+            sub.addAction(tr("(chưa có)")).setEnabled(False)
+        sub.addSeparator()
+        for family in families:
+            action = self._tool_actions.get(family)
+            label = TR_NAMES.get(str(family), str(family))
+            if action is not None:
+                sub.addAction(tr("Thêm %s…") % tr(label), action.trigger)
+        return sub
+
+    def _bim_edit_element(self, element_id) -> None:
+        """Select one element in the model and open its properties."""
+        from core.building.scene_sync import group_for
+
+        scene = self.viewport.scene
+        group = group_for(scene, str(element_id))
+        if group is not None:
+            scene.select([group])
+        self._on_show_building_panel()
+
+    def _bim_select_same_kind(self, kinds) -> None:
+        """Select every element of these kinds on the active storey."""
+        from core.building import model as _model
+        from core.building.scene_sync import group_for
+
+        building = _model.building_of(self.viewport.scene)
+        story = building.active_story()
+        if story is None:
+            return
+        wanted = {str(k) for k in kinds}
+        groups = [group_for(self.viewport.scene, str(e.get("id")))
+                  for e in building.elements
+                  if str(e.get("story_id")) == str(story.get("id"))
+                  and str(e.get("type")) in wanted]
+        picked = [g for g in groups if g is not None]
+        if picked:
+            self.viewport.scene.select(picked)
+            self.statusBar().showMessage(
+                tr("Đã chọn %d cấu kiện cùng loại.") % len(picked), 3000)
+
     def show_viewport_context_menu(self, global_pos, locked_image=None,
                                    locked_group=None) -> None:
         """Right-click menu, tailored to what's selected.
@@ -5364,6 +5485,17 @@ class MainWindow(QMainWindow):
                           else "Group"))
             menu.addAction(tr("Unlock “{name}”", name=name),
                            lambda g=locked_group: self._unlock_group(g))
+            menu.addSeparator()
+
+        bim = self._bim_selection(sel)
+        if bim:
+            # The BIM branch: the parametric model's own answers to a
+            # right-click on its geometry. Selecting a wall's 3D body and
+            # the wall itself are the same thing to the user, so the menu
+            # offers the element's own entries — its kind (which carries
+            # its parameters), its material, and the opening families
+            # that only make sense on a host.
+            self._build_bim_context_menu(menu, bim)
             menu.addSeparator()
 
         if sec_planes:

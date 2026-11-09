@@ -339,3 +339,60 @@ def test_the_docset_window_follows_the_model_after_an_undo(window):
     assert len(dlg.building.stories) == before, \
         "cửa sổ phải đọc mô hình hiện tại, không phải bản lúc mở"
     dlg.close()
+
+
+def test_the_bim_context_menu_answers_the_office_s_questions():
+    """Right-clicking a wall's 3D body must offer the WALL's entries — its
+    kind, its parameters, the openings it hosts — not the mesh's. The 3D
+    knows groups and the building knows elements; the join is the same key
+    the rebuild uses, so a selection never resolves by name."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QMenu
+
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.building.scene_sync import group_for
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    scene = win.viewport.scene
+    S.build_sample(win.viewport.history, scene, "townhouse")
+    building = building_of(scene)
+    wall = next(e for e in building.elements if e.get("type") == "wall")
+    group = group_for(scene, wall["id"])
+    assert group is not None
+    scene.select([group])
+    assert [e["id"] for e in win._bim_selection(scene.selection)] == \
+        [wall["id"]]
+
+    menu = QMenu(win)
+    win._build_bim_context_menu(menu, win._bim_selection(scene.selection))
+    labels = [a.text() for a in menu.actions()]
+    assert any("Sửa" in t for t in labels), labels
+    hosts = [a.menu() for a in menu.actions() if a.menu()]
+    assert hosts, "tường phải có nhánh «Trong cấu kiện này»"
+    assert "Trong cấu kiện này" in [a.text() for a in menu.actions()
+                                    if a.menu()]
+
+    # and a non-BIM selection gets no BIM branch at all
+    assert win._bim_selection([]) == []
+    win.hide()
+
+
+def test_select_same_kind_takes_the_whole_storey():
+    from core.building import samples as S
+    from core.building.model import building_of
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    scene = win.viewport.scene
+    S.build_sample(win.viewport.history, scene, "townhouse")
+    building = building_of(scene)
+    story = building.active_story() or building.stories[0]
+    expected = len([e for e in building.elements
+                    if str(e.get("story_id")) == str(story["id"])
+                    and e.get("type") == "wall"])
+    assert expected > 1
+    win._bim_select_same_kind({"wall"})
+    assert len(scene.selection) == expected
+    win.hide()
