@@ -615,6 +615,44 @@ def draw_grid(scene, building, view: DrawingView, *, history=None,
     return made
 
 
+def opening_tags(building, story) -> list:
+    """``[(name, x_mm, y_mm), …]`` — where each opening's mark stands.
+
+    A door or window is named by its mark (``D1``, ``W2``) because that is
+    the name its schedule row carries: a schedule nobody can point at on
+    the plan is a list, not a drawing. The mark stands at the CENTRE of
+    the opening, in model mm.
+    """
+    out: list = []
+    for element in building.elements:
+        if str(element.get("story_id")) != str(story["id"]):
+            continue
+        if element.get("type") not in ("door", "window"):
+            continue
+        params = element.get("params") or {}
+        mark = str(params.get("name") or "").strip()
+        if not mark:
+            continue
+        host = building.element(str(params.get("host_wall_id") or ""))
+        if host is None:
+            continue
+        hp = host.get("params") or {}
+        a = hp.get("baseline_start_mm")
+        b = hp.get("baseline_end_mm")
+        if not a or not b:
+            continue
+        length = math.hypot(float(b[0]) - float(a[0]),
+                            float(b[1]) - float(a[1]))
+        if length < 1e-6:
+            continue
+        u = float(params.get("offset_along_wall_mm", 0.0) or 0.0)
+        al = ((float(b[0]) - float(a[0])) / length,
+              (float(b[1]) - float(a[1])) / length)
+        out.append((mark, float(a[0]) + al[0] * u,
+                    float(a[1]) + al[1] * u))
+    return out
+
+
 def annotate_plan(scene, building, view: DrawingView, *, history=None,
                   dimensions=True, levels=True, rooms=True, scale_denom=None,
                   offset=None, key=None):
@@ -699,6 +737,16 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
                 QVector3D(0.0, 0.0, (level_mm - story_z) / 1000.0 + dy),
                 text, layer=ANNOT_LAYER)
             add(AddTextLabelCommand(label), label, scene.text_labels)
+
+    for mark, mx, my in opening_tags(building, story):
+        # The mark is the drawing's own word for the opening, so it lands
+        # on the annotation layer with the dimensions and the room stamps.
+        label = TextLabel(
+            QVector3D(mx / 1000.0, my / 1000.0,
+                      (story_z + float(view.row.get("cut_mm")
+                                       or DEFAULT_CUT_MM)) / 1000.0),
+            QVector3D(0.0, 0.0, 0.0), mark, layer=ANNOT_LAYER)
+        add(AddTextLabelCommand(label), label, scene.text_labels)
 
     if rooms:
         for zone in [e for e in building.elements

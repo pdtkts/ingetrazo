@@ -415,3 +415,44 @@ def test_reissuing_a_plan_replaces_its_grid_instead_of_stacking():
     first = len(scene.text_labels)
     draw_grid(scene, b, view, key="p")
     assert len(scene.text_labels) == first, "sinh lại không được xếp thêm trục"
+
+
+def test_a_door_carries_its_mark_on_the_plan():
+    """The mark is the name the schedule row is written under: a door
+    nobody can point at on the plan is a list, not a drawing."""
+    from core.building.drawings import opening_tags
+    from core.building.model import Building
+    from core.building.builder import build
+
+    b = Building()
+    story = b.add_story("Tầng 1", 0.0, 3300.0)
+    wall = b.add_element("wall", story["id"], {
+        "baseline_start_mm": [0, 0], "baseline_end_mm": [6000, 0],
+        "thickness_mm": 200.0, "height_mm": 3300.0})
+    b.add_element("door", story["id"], {
+        "host_wall_id": wall["id"], "offset_along_wall_mm": 3000.0,
+        "width_mm": 900.0, "height_mm": 2200.0, "name": "D1"})
+    b.add_element("window", story["id"], {
+        "host_wall_id": wall["id"], "offset_along_wall_mm": 5000.0,
+        "width_mm": 1200.0, "height_mm": 1400.0, "name": "W1"})
+    for element in list(b.elements):
+        build(b, element)
+    tags = opening_tags(b, story)
+    assert sorted(t[0] for t in tags) == ["D1", "W1"]
+    # The mark stands at the opening's centre, in model mm.
+    assert tags[0][1] == 3000.0
+    # An unnamed opening has no mark to draw — the schedule shows it blank.
+    b.element(b.elements[1]["id"])["params"].pop("name")
+    assert [t[0] for t in opening_tags(b, story)] == ["W1"]
+
+
+def test_an_opening_whose_wall_is_gone_is_skipped_not_crashed():
+    from core.building.drawings import opening_tags
+    from core.building.model import Building
+
+    b = Building()
+    story = b.add_story("Tầng 1", 0.0, 3300.0)
+    b.add_element("door", story["id"], {
+        "host_wall_id": "khong-ton-tai", "offset_along_wall_mm": 0.0,
+        "width_mm": 900.0, "height_mm": 2200.0, "name": "D9"})
+    assert opening_tags(b, story) == []
