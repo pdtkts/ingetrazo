@@ -602,11 +602,22 @@ class PlanWindow(QDialog):
             group = group_for(scene, str(element_id))
             if group is not None:
                 scene.select([group])
-        notify = getattr(self._window, "on_scene_changed", None)
+        self._notify_scene()
+
+    def _notify_scene(self) -> None:
+        """Let the whole app see what the plan just changed.
+
+        ``notify_scene_changed`` is what every other writer of the model
+        calls (a tool, a panel, undo): the version-changed signal redraws
+        the 3D, refreshes the panels and marks the document dirty. Calling
+        the panel's own handler instead would leave the viewport stale.
+        """
+        viewport = getattr(self._window, "viewport", None)
+        notify = getattr(viewport, "notify_scene_changed", None)
         if callable(notify):
             notify()
-        else:
-            self._window.viewport.update()
+        else:                                       # pragma: no cover
+            self._window.update()
 
     # ---- editing the model from the plan --------------------------------
     def handle_hit(self, element_id, point_mm, radius_mm: float):
@@ -770,9 +781,7 @@ class PlanWindow(QDialog):
         self.select(element_id)
         self._say(tr("Đã sửa %s") % (self.element_name_at(
             self._element_centre(element_id)) or str(element_id)))
-        notify = getattr(self._window, "on_scene_changed", None)
-        if callable(notify):
-            notify()
+        self._notify_scene()
 
     def _element_centre(self, element_id):
         ends = self._ends_of(element_id)
@@ -928,6 +937,8 @@ class PlanPropertiesDialog(QDialog):
             history.execute(command)
             if history.last_error:
                 self._plan._say(str(history.last_error))
+        self._plan.refresh()
+        self._plan._notify_scene()
         self.accept()
 
 

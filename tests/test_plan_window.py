@@ -282,3 +282,26 @@ def test_the_properties_dialog_writes_every_field_it_shows(window):
     # A press ON the wall away from both ends is a body grab, no handle.
     mid = (3000.0, 0.0)
     assert plan.handle_hit(wall_id, mid, 1.0) is None
+
+
+def test_an_edit_from_the_plan_reaches_the_3d_and_the_panels(window):
+    """The plan is one more writer of the model, so the rest must follow.
+
+    The app hears about a change through ``notify_scene_changed``; if the
+    plan called the panel's own handler instead, the 3D viewport would
+    keep painting the wall where it used to be.
+    """
+    from core.building import model as M
+    from views.plan_window import open_plan_window
+
+    _b, scene, _h = _house(window, storeys=1)
+    plan = open_plan_window(window)
+    wall_id = plan.element_at((3000.0, 0.0))
+    assert wall_id is not None
+    seen = []
+    window.viewport.sceneVersionChanged.connect(seen.append)
+    plan.drag_element(wall_id, (3500.0, 0.0), (3000.0, 0.0), "body")
+    plan.finish_drag(wall_id, (3000.0, 0.0), "body")
+    assert seen, "sửa từ Plan phải phát tín hiệu cho cả app"
+    moved = M.building_of(scene).element(wall_id)["params"]["baseline_start_mm"]
+    assert moved == [500.0, 0.0], moved
