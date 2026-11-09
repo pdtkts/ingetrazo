@@ -282,10 +282,24 @@ def _open_plan_commands() -> frozenset:
 OPEN_PLAN_COMMANDS = _open_plan_commands()
 
 #: Where a registry command's own id differs from the app's tool key.
+#:
+#: The registry names a command the way the WORKSPACE names it; the app
+#: registers a tool under the key it was written with. Where the two
+#: differ, this is the translation — and a command missing from it showed
+#: up DISABLED in the menu while the tool was right there in ``_tools``,
+#: which is the one thing a disabled entry must never do.
 COMMAND_TOOLS_FOR_MENU = {
     "dimension": "dim",
     "text": "text",
     "label": "label",
+    # Only where the app HAS the tool under another key. Naming one that
+    # does not exist would enable an entry that does nothing when clicked
+    # — the failure this table exists to prevent — so a command without a
+    # tool stays out and its entry stays honestly disabled.
+    "measure": "tape",
+    "rect": "rectangle",
+    "rrect": "rotated_rect",
+    "arc2": "arc",
 }
 
 

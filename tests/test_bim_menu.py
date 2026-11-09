@@ -490,3 +490,42 @@ def test_the_stair_tool_builds_a_stair_and_reports_a_bad_riser():
         assert "150" in win.statusBar().currentMessage(), \
             "cảnh báo bậc thang không tới người dựng"
     win.hide()
+
+
+def test_the_command_table_never_names_a_tool_that_is_not_there(window):
+    """A mapping naming a tool the app does not have would ENABLE an entry
+    that does nothing when clicked — the exact failure the disabled entries
+    exist to avoid. Every mapped key must resolve, and every registry
+    command must be either runnable or honestly disabled."""
+    from core.building import registry as _registry
+    from views.main_window import COMMAND_TOOLS_FOR_MENU, OPEN_PLAN_COMMANDS
+
+    tools = set(window._tools)
+    for cmd_id, tool in COMMAND_TOOLS_FOR_MENU.items():
+        assert _registry.find(cmd_id), f"{cmd_id} không có trong registry"
+        assert tool in tools or tool in OPEN_PLAN_COMMANDS, \
+            f"{cmd_id} → {tool}: công cụ không tồn tại"
+
+    runnable = set()
+    for cmd_id, _label, _group in _registry.LIST:
+        tool = COMMAND_TOOLS_FOR_MENU.get(cmd_id, cmd_id)
+        if tool in tools or tool in OPEN_PLAN_COMMANDS:
+            runnable.add(cmd_id)
+    # The ones the workspace is built around must be runnable; the rest are
+    # recorded as ✗ in the parity checklist rather than pretended.
+    for wanted in ("select", "wall", "column", "beam", "slab", "ceiling",
+                   "roof", "stair", "door", "window", "zone", "fixture",
+                   "section", "crop", "magnifier", "measure", "rect",
+                   "rrect", "arc2", "pick", "inject"):
+        assert wanted in runnable, wanted
+
+
+def test_a_command_with_no_tool_is_shown_disabled_with_a_reason(window):
+    """«a menu entry that does nothing when clicked is worse than one that
+    admits it» — and the admission must name the command."""
+    from PySide6.QtWidgets import QMenu
+
+    menu = QMenu()
+    action = window._bim_command_action("worksheet", menu)
+    assert not action.isEnabled()
+    assert "chưa có" in action.toolTip(), action.toolTip()
