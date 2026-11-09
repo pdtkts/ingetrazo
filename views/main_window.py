@@ -3042,56 +3042,21 @@ class MainWindow(QMainWindow):
             tr("Còn thiếu trước khi sinh:") + "\n" + "\n".join(lines))
 
     def _on_generate_docset(self) -> None:
-        """Lập hồ sơ: generate the whole drawing set, with a progress bar.
+        """Lập hồ sơ: the drawing-set window — check, options, steps, result.
 
-        Generation can take seconds on a real building, and a window that
-        freezes without a word reads as a crash — so it reports each sheet
-        as it is filled, and the user sees the set appear.
+        The screen is a dialog rather than a progress bar and a message box
+        because the office has to see the check report BEFORE the run and
+        the steps WHILE it runs; see :class:`views.docset_dialog.DocSetDialog`.
         """
-        from PySide6.QtWidgets import (QApplication, QMessageBox,
-                                       QProgressDialog)
-        from core.building import docset as _docset
+        from views.docset_dialog import DocSetDialog
         building = self._bim_building()
         if building is None:
             return
-        scene = self.viewport.scene
-        issues = _docset.check_docset(building)
-        warnings = [t for t, sev in issues if sev == "warn"]
-        if warnings:
-            answer = QMessageBox.question(
-                self, tr("Lập hồ sơ tự động"),
-                tr("%d điểm cần lưu ý:") % len(warnings) + "\n"
-                + "\n".join(f"• {t}" for t in warnings[:6])
-                + "\n\n" + tr("Vẫn sinh hồ sơ?"))
-            if answer != QMessageBox.Yes:
-                return
-        dlg = QProgressDialog(tr("Đang lập hồ sơ…"), "", 0, 100, self)
-        dlg.setCancelButton(None)
-        dlg.setWindowModality(Qt.WindowModal)
-        dlg.setAutoClose(False)
-
-        def progress(index, total, label):
-            dlg.setValue(int(100.0 * index / max(total, 1)))
-            dlg.setLabelText(tr(label))
-            QApplication.processEvents()
-
-        dlg.setValue(0)
-        try:
-            result = _docset.generate_docset(scene, building,
-                                             progress=progress)
-        except Exception as exc:                    # noqa: BLE001 — reported
-            dlg.reset()
-            QMessageBox.warning(self, tr("Lập hồ sơ tự động"),
-                                f"{type(exc).__name__}: {exc}")
+        dlg = DocSetDialog(self, building, self.viewport.scene)
+        result = dlg.run()
+        if result is None:
             return
-        dlg.setValue(100)
-        dlg.reset()
         self.viewport.update()
-        QMessageBox.information(
-            self, tr("Lập hồ sơ tự động"),
-            tr("Đã sinh %d tờ, %d tờ có bản vẽ.")
-            % (len(result.sheets),
-               len([s for s in result.sheets if s.frames])))
 
     def _on_export_takeoff_csv(self) -> None:
         from core.building import takeoff as _takeoff

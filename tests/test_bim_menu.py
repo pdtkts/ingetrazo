@@ -184,3 +184,65 @@ def test_the_dxf_action_writes_a_drawing(window, tmp_path, monkeypatch):
     import ezdxf
     doc = ezdxf.readfile(str(path))
     assert any(e.dxftype() == "LINE" for e in doc.modelspace())
+
+
+def test_the_docset_screen_shows_the_check_before_it_runs(window):
+    """The office reads what the set will miss BEFORE generating it."""
+    from views.docset_dialog import DocSetDialog
+    building, scene, _history = _house(window)
+    _story, _zone = building, None
+    dlg = DocSetDialog(window, building, scene)
+    assert dlg.issues, "nhà mẫu còn thiếu phòng nên phải có điểm lưu ý"
+    texts = [dlg.step_list.item(i).text()
+             for i in range(dlg.step_list.count())]
+    assert texts == [], "chưa bấm Lập hồ sơ thì chưa có bước nào"
+    dlg._generate()
+    steps = [dlg.step_list.item(i).text()
+             for i in range(dlg.step_list.count())]
+    assert any("Trang bìa" in s for s in steps)
+    assert dlg.docset is not None and dlg.docset.sheets
+    drawn = [s for s in dlg.docset.sheets if s.frames]
+    assert drawn, "phải có tờ mang bản vẽ"
+    dlg.close()
+
+
+def test_the_docset_screen_honours_its_options(window):
+    """Unticking the elevation must remove its sheet, not just its label."""
+    from views.docset_dialog import DocSetDialog
+    building, scene, _history = _house(window)
+    dlg = DocSetDialog(window, building, scene)
+    dlg.elev_box.setChecked(False)
+    dlg.sect_box.setChecked(False)
+    dlg.annot_box.setChecked(False)
+    dlg._generate()
+    names = [s.name for s in dlg.docset.sheets]
+    assert not any("Mặt đứng" in n for n in names)
+    assert not any("Mặt cắt" in n for n in names)
+    dlg.close()
+
+
+def test_the_docset_screen_limits_the_issue_to_the_ticked_storeys(window):
+    from views.docset_dialog import DocSetDialog
+    building, scene, _history = _house(window)
+    dlg = DocSetDialog(window, building, scene)
+    assert len(dlg.story_boxes) >= 2, "nhà mẫu có nhiều tầng"
+    dlg.story_boxes[1][1].setChecked(False)
+    dlg._generate()
+    names = " | ".join(s.name for s in dlg.docset.sheets)
+    second = str(building.story(dlg.story_boxes[1][0]).get("name"))
+    assert f"Mặt bằng — {second}" not in names
+    dlg.close()
+
+
+def test_the_docset_screen_reports_a_blank_sheet_instead_of_hiding_it(window):
+    """A blank sheet that ships is the failure this screen must name."""
+    from views.docset_dialog import DocSetDialog
+    building, scene, _history = _house(window)
+    dlg = DocSetDialog(window, building, scene)
+    dlg._generate()
+    texts = [dlg.step_list.item(i).text()
+             for i in range(dlg.step_list.count())]
+    assert any("Đã sinh" in t for t in texts), texts[-3:]
+    assert not any("Tờ chưa có nội dung" in t for t in texts), \
+        "bộ tờ này không được phát hành tờ trắng nào"
+    dlg.close()
