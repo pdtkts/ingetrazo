@@ -76,7 +76,8 @@ def _ensure_layer(doc, name: str, color: int, lineweight: float,
 def save_drawing_dxf(path: str | Path, view, scene, *,
                      layer_map: dict | None = None,
                      with_hatch: bool = True, with_dimensions: bool = True,
-                     with_text: bool = True, doc_name: str = "") -> dict:
+                     with_text: bool = True, doc_name: str = "",
+                     annotation_key: str = "") -> dict:
     """Write one drawing's DXF. Returns a count summary.
 
     ``view`` is a :class:`core.building.drawings.DrawingView` (its camera
@@ -91,6 +92,8 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
             "Cần ezdxf để xuất DXF bản vẽ (pip install ezdxf).")
     from core.hlr import hlr_drawing
 
+    if annotation_key:
+        view.annotation_key = str(annotation_key)
     doc = ezdxf.new("R2000", setup=True)
     doc.units = ezdxf.units.MM
     doc.header["$INSUNITS"] = 4                    # millimetres
@@ -175,7 +178,7 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
                                  dtype=float), eye, right, up, fwd)[0]
             return (float(c[0]) * MM, float(c[1]) * MM)
 
-        for label in getattr(scene, "text_labels", None) or []:
+        for label in _labels_of(scene, view):
             if not scene.entity_visible(label):
                 continue
             x, y = to_plane(label.position())
@@ -208,7 +211,7 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
                                  dtype=float), eye, right, up, fwd)[0]
             return (float(c[0]) * MM, float(c[1]) * MM)
 
-        for dim in getattr(scene, "dimensions", None) or []:
+        for dim in _dims_of(scene, view):
             if not scene.entity_visible(dim):
                 continue
             a, b = to_plane(dim.a), to_plane(dim.b)
@@ -234,6 +237,69 @@ def save_drawing_dxf(path: str | Path, view, scene, *,
     doc.saveas(str(path))
     counts["layers"] = len(doc.layers)
     return counts
+
+
+def _owned(scene, view):
+    """The entities one BIM drawing published, or ``None`` for «everything».
+
+    The document holds EVERY storey's annotations at once (each drawing
+    stamps the ones it made with the registry ``bim_annotations``), and an
+    export that wrote them all would carry the floor above's levels and
+    room areas on the ground floor's DXF — numbers that are not wrong,
+    only about a drawing nobody is looking at. Scoped when the registry
+    knows this drawing; unscoped for a document whose annotations were
+    placed by hand (the composer's own labels), which the registry does
+    not describe.
+    """
+    registry = getattr(scene, "bim_annotations", None)
+    if not isinstance(registry, dict) or not registry:
+        return None
+    key = _drawing_key(scene, registry_key)
+    if key is None:
+        return None
+    return {id(e) for e in registry.get(key, ())}
+
+
+def _drawing_key(scene, view):
+    """The registry key this drawing's annotations were filed under.
+
+    An explicit ``view.annotation_key`` wins — the caller that published
+    the annotations knows where it put them (the DXF menu files them under
+    ``dxf:<storey>``, a sheet under its own scene name). Without one the
+    drawing's name is tried, then the storey's, which covers a document
+    issued by the set.
+    """
+    registry = getattr(scene, "bim_annotations", None) or {}
+    wanted = str(getattr(view, "annotation_key", "") or "")
+    if wanted and wanted in registry:
+        return wanted
+    candidates = [str(getattr(view, "name", "") or ""),
+                  str(getattr(view, "story_id", "") or "")]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        for key in registry:
+            if str(key) == candidate or str(key).endswith(f":{candidate}"):
+                return str(key)
+    return None
+
+
+def _labels_of(scene, view):
+    """The labels this drawing owns, or every visible one when unscoped."""
+    owned = _owned(scene, view)
+    labels = getattr(scene, "text_labels", None) or []
+    if owned is None:
+        return list(labels)
+    return [label for label in labels if id(label) in owned]
+
+
+def _dims_of(scene, view):
+    """The dimensions this drawing owns, or every visible one."""
+    owned = _owned(scene, view)
+    dims = getattr(scene, "dimensions", None) or []
+    if owned is None:
+        return list(dims)
+    return [dim for dim in dims if id(dim) in owned]
 
 
 def save_plan_dxf(path: str | Path, scene, building, story_id: str, **kw):

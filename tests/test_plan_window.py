@@ -119,7 +119,7 @@ def test_a_click_picks_the_element_under_the_cursor(window):
     building, scene, _h = _house(window, storeys=1)
     plan = open_plan_window(window)
     # On the wall's baseline: the wall, and the selection reaches the app.
-    hit = plan.element_at((3000.0, 0.0))
+    hit = plan.element_at((1500.0, 0.0))
     assert hit is not None
     assert str(building.element(hit)["type"]) == "wall"
     plan.select(hit)
@@ -219,7 +219,7 @@ def test_a_drag_moves_the_element_and_undo_puts_it_back(window):
 
     _b, scene, history = _house(window, storeys=1)
     plan = open_plan_window(window)
-    wall_id = plan.element_at((3000.0, 0.0))
+    wall_id = plan.element_at((1500.0, 0.0))
     assert wall_id is not None
     plan.select(wall_id)
     before = list(M.building_of(scene).element(wall_id)
@@ -247,7 +247,7 @@ def test_the_handle_pulls_one_end_and_leaves_the_other(window):
 
     _b, scene, _h = _house(window, storeys=1)
     plan = open_plan_window(window)
-    wall_id = plan.element_at((3000.0, 0.0))
+    wall_id = plan.element_at((1500.0, 0.0))
     assert wall_id is not None
     plan.select(wall_id)
     params = M.building_of(scene).element(wall_id)["params"]
@@ -272,7 +272,7 @@ def test_the_properties_dialog_writes_every_field_it_shows(window):
 
     _b, scene, _h = _house(window, storeys=1)
     plan = open_plan_window(window)
-    wall_id = plan.element_at((3000.0, 0.0))
+    wall_id = plan.element_at((1500.0, 0.0))
     assert wall_id is not None
     dialog = PlanPropertiesDialog(plan, wall_id)
     assert "thickness_mm" in dialog.fields
@@ -299,7 +299,7 @@ def test_an_edit_from_the_plan_reaches_the_3d_and_the_panels(window):
 
     _b, scene, _h = _house(window, storeys=1)
     plan = open_plan_window(window)
-    wall_id = plan.element_at((3000.0, 0.0))
+    wall_id = plan.element_at((1500.0, 0.0))
     assert wall_id is not None
     seen = []
     window.viewport.sceneVersionChanged.connect(seen.append)
@@ -329,3 +329,41 @@ def test_delete_takes_the_wall_and_the_openings_in_its_face(window):
     assert history.undo(), "phải hoàn tác được"
     assert M.building_of(scene).element(str(wall["id"])) is not None
     assert M.building_of(scene).element(str(door["id"])) is not None
+
+
+def test_a_door_can_be_picked_and_dragged_on_the_plan(window):
+    """An opening states an offset ALONG ITS WALL, not a centre: picking it
+    must not need a parameter the builders never write, or a tool-made door
+    can be neither selected nor dragged nor deleted."""
+    from core.building import model as M
+    from views.plan_window import open_plan_window
+
+    _b, scene, _h = _house(window, storeys=1)
+    plan = open_plan_window(window)
+    building = M.building_of(scene)
+    door = next(e for e in building.elements if e.get("type") == "door")
+    host = building.element(str(door["params"]["host_wall_id"]))
+    hp = host["params"]
+    a, b = hp["baseline_start_mm"], hp["baseline_end_mm"]
+    u = float(door["params"]["offset_along_wall_mm"])
+    length = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5
+    where = (a[0] + (b[0] - a[0]) * u / length, a[1] + (b[1] - a[1]) * u / length)
+    assert plan.element_at(where) == door["id"], "không chọn được cửa"
+
+
+def test_the_open_plan_follows_an_edit_made_elsewhere(window):
+    """A plan left open must re-read when the model moves under it: the
+    window shows — and picks against — whatever the model is now."""
+    from core.building import model as M
+    from core.building.commands import add_story
+    from views.plan_window import open_plan_window
+
+    _b, scene, history = _house(window, storeys=1)
+    plan = open_plan_window(window)
+    assert plan.story_box.count() == 1
+    # Every writer of the model announces it; the panel and the 3D both
+    # rely on that, and so does this window.
+    history.execute(add_story("Tầng 2", 3300.0, 3300.0))
+    window.viewport.notify_scene_changed()
+    assert plan.story_box.count() == 2, "cửa sổ Plan không theo mô hình"
+    del M

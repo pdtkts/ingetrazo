@@ -349,3 +349,45 @@ def test_a_subset_issue_does_not_delete_the_other_storeys_sheets():
                           elevations=False, sections=False)
     after = {getattr(s, "bim_key", "") for s in scene.compositions}
     assert before <= after, f"mất tờ của tầng khác: {before - after}"
+
+
+def test_a_drawing_scene_carries_the_drawing_s_own_layers_not_the_live_ones():
+    """A layer the user happened to hide in the 3D must not be baked into
+    the sheet: the scene records the VIEW's own filter, always."""
+    from core.building import sheets as _sheets
+    from core.layers import Layer
+
+    b = _house(1)
+    scene = Scene()
+    _sheets.ensure_sheets(scene, b)
+    layer = next((ly for ly in scene.layers
+                  if str(getattr(ly, "name", "")).startswith("BIM")), None)
+    if layer is None:
+        layer = Layer("BIM Tường")
+        scene.layers.append(layer)
+    layer.visible = False
+    DS.generate_docset(scene, b)
+    view = next(v for v in scene.saved_views if v.name.startswith("Mặt bằng"))
+    assert layer.name not in view.hidden_layers, \
+        "lớp người dùng ẩn trong 3D bị đóng vào bản vẽ"
+
+
+def test_a_same_named_scene_the_user_saved_is_not_hijacked():
+    """The generator reuses ITS OWN scenes; a scene the user saved under
+    the same name keeps its camera and its layers."""
+    from core.building import sheets as _sheets
+    from core.saved_views import SavedView
+
+    b = _house(1)
+    scene = Scene()
+    mine = SavedView("Mặt bằng Tầng 1", target=(99.0, 99.0, 99.0),
+                     distance=7.0, yaw=0.3, pitch=0.4)
+    mine.hidden_layers = ["Lớp của tôi"]
+    scene.saved_views.append(mine)
+    DS.generate_docset(scene, b)
+    assert mine.target == (99.0, 99.0, 99.0), "cảnh của người dùng bị ghi đè"
+    assert mine.hidden_layers == ["Lớp của tôi"]
+    assert len([v for v in scene.saved_views
+                if v.name == "Mặt bằng Tầng 1"]) == 2, \
+        "bản vẽ phải có cảnh riêng của nó"
+    del _sheets

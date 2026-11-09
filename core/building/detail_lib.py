@@ -156,9 +156,10 @@ def insert_detail_on_sheet(sheet, key: str, *, x_mm: float | None = None,
     Composed of the same items the composer's editor works with — the
     bands as outlined shapes, the callouts as labels, the title as text —
     so the detail can be dragged, restyled, grouped and re-exported like
-    anything drawn by hand. The hatching of each band comes from the
-    pattern table when the sheet is rendered, so the detail keeps its
-    material reading without baking thousands of segments into the .igz.
+    anything drawn by hand. A band whose material has a pattern is filled
+    solid, which is what the composer's own shapes can render today; the
+    pattern table in :mod:`core.building.patterns` is geometry for the
+    drawings and the DXF, not for a sheet item.
 
     A detail is drawn at 1:10 by default: one model millimetre is 0.1 mm
     of paper. Returns where it landed and what was placed.
@@ -170,6 +171,20 @@ def insert_detail_on_sheet(sheet, key: str, *, x_mm: float | None = None,
     x0 = 40.0 if x_mm is None else float(x_mm)
     y0 = 40.0 if y_mm is None else float(y_mm)
     w = (rect[2] - rect[0]) * k
+    # A detail already on the sheet is REPLACED, not stacked: the items
+    # carry the detail's own key in their names, so a second insert
+    # doubles the drawing unless the old ones go first (the reference
+    # geometry is the same stack — nothing is gained by two of it).
+    tag = f"__detail__{key}"
+    sheet.shapes[:] = [item for item in sheet.shapes
+                       if not str(getattr(item, "list_name", "")
+                                  ).startswith(tag)]
+    sheet.etiquetas[:] = [item for item in sheet.etiquetas
+                          if not str(getattr(item, "list_name", "")
+                                     ).startswith(tag)]
+    sheet.texts[:] = [item for item in sheet.texts
+                      if not str(getattr(item, "list_name", "")
+                                 ).startswith(tag)]
     made = {"bands": 0, "labels": 0, "x_mm": x0, "y_mm": y0, "w_mm": w,
             "h_mm": (rect[3] - rect[1]) * k, "scale": float(scale_denom),
             "name": name(key)}

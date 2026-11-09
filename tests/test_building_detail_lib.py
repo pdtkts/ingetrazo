@@ -69,3 +69,17 @@ def test_the_detail_survives_the_round_trip_through_the_document():
     assert len(again.shapes) == len(sheet.shapes)
     assert len(again.etiquetas) == len(sheet.etiquetas)
     assert again.shapes[0].list_name.startswith("__detail__stair_step")
+
+
+def test_inserting_the_same_detail_twice_replaces_it():
+    """A second insert is a re-place, not a second copy: the items carry
+    the detail's own key, so the old stack goes first."""
+    from core.composition import Composicion
+
+    sheet = Composicion()
+    first = DL.insert_detail_on_sheet(sheet, DL.keys()[0], x_mm=40.0)
+    again = DL.insert_detail_on_sheet(sheet, DL.keys()[0], x_mm=40.0)
+    assert again["bands"] == first["bands"]
+    assert len(sheet.shapes) == first["bands"], \
+        f"chi tiết bị chồng: {len(sheet.shapes)} mảng"
+    assert len(sheet.texts) == 1

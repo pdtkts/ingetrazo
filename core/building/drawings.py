@@ -103,7 +103,7 @@ class DrawingView:
     __slots__ = ("kind", "name", "row", "story_id", "target", "distance",
                  "yaw", "pitch", "up", "fov_deg", "section_planes",
                  "clip_planes", "crop_u", "crop_v", "scale_denom",
-                 "hidden_layers")
+                 "hidden_layers", "annotation_key")
 
     def __init__(self, kind: str, name: str = "", row: dict | None = None,
                  story_id: str | None = None, target=(0.0, 0.0, 0.0),
@@ -132,6 +132,10 @@ class DrawingView:
         #: Layers this drawing HIDES — the view filter. An empty list shows
         #: everything; a layout names every trade but its own.
         self.hidden_layers: list = []
+        #: The registry key this drawing's annotations are filed under, so
+        #: an export writes THIS drawing's numbers and not the whole
+        #: document's (every storey's levels live in the scene at once).
+        self.annotation_key: str = ""
 
     # ---- What the rest of the app consumes ----------------------------------
 
@@ -861,11 +865,17 @@ def _clear_annotations(scene, key: str) -> list:
     if registry is None:
         return []
     gone = list(registry.pop(key, ()))
+    # The grid's own axis LINES are mesas edges, not labels: a re-issue
+    # that only replaced the words left the old lines standing, so two
+    # sets of them showed on one drawing after the storey moved.
+    mesh = getattr(scene, "mesh", None)
     for entity in gone:
         if entity in scene.dimensions:
             scene.dimensions.remove(entity)
         if entity in scene.text_labels:
             scene.text_labels.remove(entity)
+        if mesh is not None and entity in mesh.edges:
+            mesh.edges.remove(entity)
         scene.selection.discard(entity)
     return gone
 
@@ -1032,8 +1042,11 @@ def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
     scene_name = name or view.name or VIEW_LABELS.get(
         view.kind, view.kind)
     install_view_planes(scene, view, tag=f"drawing:{scene_name}")
+    # A same-named scene that the generator did NOT make is the user's:
+    # rewriting it would take their camera and their own layer choices.
     existing = next((sv for sv in scene.saved_views
-                     if sv.name == scene_name), None)
+                     if sv.name == scene_name
+                     and str(getattr(sv, "drawing", "") or "")), None)
     viewpoint = view.camera()
     if existing is None:
         existing = SavedView.capture(scene_name, scene, viewpoint)
@@ -1052,22 +1065,24 @@ def place_on_sheet(sheet, view: DrawingView, scene, *, name: str = "",
         existing.pitch = float(viewpoint.pitch)
         existing.fov_deg = float(viewpoint.fov_deg)
         existing.perspective = bool(viewpoint.perspective)
-        existing.hidden_layers = []
     # The cut: a scene records which plane is active by uid, and the
     # capture above ran with whatever the VIEWPORT had on — so the
     # drawing's own cut is written in explicitly, or recalling the scene
     # would switch the plan's +1200 cut off.
-    if view.section_planes:
-        existing.section = {
-            "active": view.section_planes[0].uid,
-            "planes_shown": bool(getattr(scene, "show_section_planes",
-                                         True)),
-            "cuts_shown": True}
+    existing.section = {
+        # No cut of its own is a STATEMENT, not a gap: an elevation that
+        # inherited the live active plane would be cut by whatever the user
+        # left switched on, and recall it that way afterwards.
+        "active": (view.section_planes[0].uid if view.section_planes
+                   else None),
+        "planes_shown": bool(getattr(scene, "show_section_planes", True)),
+        "cuts_shown": bool(view.section_planes)}
     # The view filter: a layout shows one trade, so its scene hides the
-    # other trades' layers. Recorded on the scene, which is what makes the
-    # frame independent of the live layer state.
-    if view.hidden_layers:
-        existing.hidden_layers = [str(n) for n in view.hidden_layers]
+    # other trades' layers. Written UNCONDITIONALLY and from the view
+    # alone: the capture above ran with the live viewport's layers, and a
+    # layer the user happened to have hidden in the 3D would otherwise be
+    # baked into the drawing, silently dropping a trade from the sheet.
+    existing.hidden_layers = [str(n) for n in (view.hidden_layers or ())]
     existing.drawing = view.to_dict()
 
     page_w, page_h = sheet.page_size_mm()

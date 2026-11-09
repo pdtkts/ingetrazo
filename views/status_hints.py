@@ -55,6 +55,28 @@ HINTS: dict = {
     # Ctrl is not spelled out here any more: the tool's own clause carries it
     # — «Ctrl = [keep the base] / move the base» — the way the Tape's does,
     # and repeating it ate the room the instruction needs (Marco, 2026-09-17).
+    # ---- the BIM tools: the same two-step shape as Line, so the same
+    # shape of hint; each tool's own `status_clause()` adds its Ctrl
+    # clause (a slab picks a room with Ctrl, a zone picks with one click).
+    "wall": ("Click the start of the wall; the next wall starts where this one ended.",
+             "Click the end, or type the length and Enter."),
+    "curtain_wall": ("Click the start of the glazed run.",
+                     "Click the end; the carrier wall is made with it."),
+    "beam": ("Click the start of the beam's axis.",
+             "Click the end; the beam hangs under the level above."),
+    "column": "Click the column's centre.",
+    "door": ("Click the wall the door goes in.",
+             "Click where it sits along the wall, or type the distance."),
+    "window": ("Click the wall the window goes in.",
+               "Click where it sits along the wall, or type the distance."),
+    "fixture": "Click the fixture's centre.",
+    "slab": ("Drag a rectangle, or Ctrl = pick the room's boundary.",
+             "Drag the rectangle, or click the room's inside."),
+    "ceiling": ("Drag a rectangle, or Ctrl = pick the room's boundary.",
+                "Drag the rectangle, or click the room's inside."),
+    "roof": ("Drag a rectangle, or Ctrl = pick the room's boundary.",
+             "Drag the rectangle, or click the room's inside."),
+    "zone": "Click inside the room: its boundary and area are found.",
     "pushpull": ("Click a face and move.",
                  "Move, or type the distance and Enter. Double-click repeats the last."),
     "move": ("Click what to move (or select it first). Red + on a group = rotate it.",

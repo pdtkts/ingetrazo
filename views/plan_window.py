@@ -65,7 +65,8 @@ def key_for_command(cmd_id: str) -> str:
 COMMAND_TOOLS = {
     "select": "select", "protractor": "protractor", "measure": "tape",
     "move": "move", "rotate": "rotate", "scale": "scale",
-    "offset": "offset", "eraser": "eraser", "flip": "flip",
+    "offset": "offset", "eraser": "eraser", "delete": "eraser",
+    "flip": "flip",
     "line": "line", "polyline": "freehand", "rect": "rectangle",
     "rrect": "rotated_rect", "polygon": "polygon", "circle": "circle",
     "arc2": "arc", "arc3": "arc3", "spline": "freehand",
@@ -101,6 +102,8 @@ class _Canvas(QWidget):
         #: ``kind`` is "body" or "handle", ``grab`` the model point the
         #: drag started from. ``None`` means a left press is only a pick.
         self._edit = None
+        #: Drag preview segments (model mm), drawn dashed while dragging.
+        self._ghost = None
         #: Fit on the first real resize, not in the constructor: the widget
         #: has a placeholder size (320x240) until the layout runs, and a
         #: fit against that frames the plan against the wrong box.
@@ -122,6 +125,34 @@ class _Canvas(QWidget):
     #: How close (in screen pixels) a press must be to an element's own
     #: end to count as its handle rather than its body.
     HANDLE_PX = 7.0
+
+    def begin_ghost(self) -> None:
+        """Start showing a drag preview (the moving element's own lines)."""
+        self._ghost = []
+
+    def set_ghost(self, segments) -> None:
+        self._ghost = list(segments)
+        self.update()
+
+    def end_ghost(self) -> None:
+        self._ghost = None
+        self.update()
+
+    def _paint_ghost(self, painter: QPainter) -> None:
+        """The drag preview: where the element is going.
+
+        Not the final linework — the hidden-line pass cannot run at drag
+        speed on a large model (1.1 s on three thousand elements), so the
+        move shows the element's own edges in the camera plane, and the
+        real drawing replaces them the moment the drag ends. A preview
+        that said nothing about being a preview would be worse than none.
+        """
+        if not self._ghost:
+            return
+        pen = QPen(QColor("#1e6fd9"), 1.4, Qt.DashLine)
+        painter.setPen(pen)
+        for x0, y0, x1, y1 in self._ghost:
+            painter.drawLine(self.to_screen(x0, y0), self.to_screen(x1, y1))
 
     def to_screen(self, x_mm: float, y_mm: float) -> QPointF:
         k = self.scale_px_per_mm
@@ -186,6 +217,7 @@ class _Canvas(QWidget):
                 handle = self._plan.handle_hit(
                     hit, model, self.HANDLE_PX / self.scale_px_per_mm)
                 self._edit = ("handle" if handle else "body", hit, model)
+                self.begin_ghost()
                 event.accept()
                 return
             self._selected = hit
@@ -224,12 +256,34 @@ class _Canvas(QWidget):
         if event.button() == Qt.LeftButton and self._edit is not None:
             kind, element_id, grab = self._edit
             self._edit = None
+            self.end_ghost()
             self._plan.finish_drag(element_id, grab, kind)
             event.accept()
             return
         if event.button() in (Qt.MiddleButton, Qt.RightButton):
             self._drag_from = None
             event.accept()
+
+    def keyPressEvent(self, event) -> None:         # noqa: N802 — Qt
+        """Delete removes the selected element; Esc drops the selection.
+
+        A drag needs no keyboard, but a pick does: the plan's own way to
+        remove is the Delete key, through the same command the panel uses
+        (so it is one undo step and the 3D follows).
+        """
+        if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            if self._selected is not None:
+                self._plan.remove_element(self._selected)
+                self._selected = None
+                event.accept()
+                return
+        if event.key() == Qt.Key_Escape:
+            self._selected = None
+            self._plan.select(None)
+            self.update()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _paint_handles(self, painter: QPainter) -> None:
         """The selected element's own ends: where a drag would pull.
@@ -257,6 +311,7 @@ class _Canvas(QWidget):
         self._paint_loops(painter)
         self._paint_segs(painter)
         self._paint_marks(painter)
+        self._paint_ghost(painter)
         self._paint_handles(painter)
         painter.end()
 
@@ -316,6 +371,7 @@ class PlanWindow(QDialog):
         self._pending = None
         self._drag_origin = None
         self._drag_base = None
+        self._drag_rests = []
         self._last_moved = None
 
         lay = QVBoxLayout(self)
@@ -340,6 +396,13 @@ class PlanWindow(QDialog):
         zout = QPushButton(tr("Thu nhỏ"))
         zout.clicked.connect(lambda: self.canvas.zoom_by(1 / 1.25))
         top.addWidget(zout)
+        self.hide_unprinted_box = QCheckBox(tr("Như khi in"))
+        self.hide_unprinted_box.setToolTip(tr(
+            "Xem đúng những gì tờ giấy sẽ in: lớp đặt «không in» bị ẩn đi. "
+            "Bỏ chọn để thấy cả lớp dựng hình như trong cửa sổ 3D."))
+        self.hide_unprinted_box.stateChanged.connect(
+            lambda _state: self.canvas.reload())
+        top.addWidget(self.hide_unprinted_box)
         keys = QPushButton(tr("Phím tắt…"))
         keys.setToolTip(tr("Xem phím tắt mặc định của cửa sổ Plan"))
         keys.clicked.connect(self.show_shortcuts)
@@ -359,6 +422,29 @@ class PlanWindow(QDialog):
         lay.addWidget(self.status)
 
         self.refresh()
+        # The window is open while the model is edited elsewhere (the 3D,
+        # a tool, the panel, undo), so it follows the version signal like
+        # every other view. Without it an open plan keeps showing — and
+        # PICKING against — a model that has already moved.
+        viewport = getattr(window, "viewport", None)
+        version = getattr(viewport, "sceneVersionChanged", None)
+        if version is not None:
+            version.connect(self._on_model_version)
+
+    def _on_model_version(self, _version=None) -> None:
+        """The model changed under us: re-read, unless a drag owns it.
+
+        A drag in progress is editing THAT element and has not committed
+        yet; re-reading mid-drag would rebuild the drawing over the ghost
+        and (worse) re-resolve the element the drag is holding.
+        """
+        if self._drag_origin is not None or self._edit_in_flight:
+            return
+        self.refresh()
+
+    #: Set while a properties dialog is open, for the same reason: the
+    #: dialog's own write must not rebuild the drawing under it.
+    _edit_in_flight = False
 
     # ---- the tool bar ----------------------------------------------------
     def bar_widget(self) -> QWidget:
@@ -494,16 +580,31 @@ class PlanWindow(QDialog):
 
         if self._view is None or self._building is None:
             return ([], [], [], (0.0, 0.0, 1000.0, 1000.0))
+        # The working view shows what the 3D shows; «Như khi in» narrows it
+        # to what the sheet will print, because a layer set not to print
+        # never reaches paper. The switch is explicit so the two readings
+        # can never be confused for each other.
+        restore_layers = None
+        if self.hide_unprinted_box.isChecked():
+            from core.layers import unprinted
+
+            restore_layers = [(ly, ly.visible) for ly in unprinted(self._scene)]
+            for ly, _was in restore_layers:
+                ly.visible = False
         try:
             drawing = hlr_drawing(
                 self._scene, self._view.camera(), profiles=True,
                 fills=True, hidden=True,
+                geometry=self._cached_geometry(),
                 clip_planes=self._view.clip_planes,
                 section=(self._view.section_planes[0]
                          if self._view.section_planes else None))
         except Exception as exc:                    # noqa: BLE001 — reported
             self._say(f"{type(exc).__name__}: {exc}")
             return ([], [], [], (0.0, 0.0, 1000.0, 1000.0))
+        finally:
+            for ly, was in restore_layers or ():
+                ly.visible = was
         # The hidden-line pass works in the CAMERA plane, with its origin
         # at the view's target — not at the model's. Adding the target's
         # own plan position puts the linework back in model millimetres,
@@ -523,6 +624,28 @@ class PlanWindow(QDialog):
                                   self._building.story(self._story_id)
                                   or {})
         return (segs, loops, marks, box)
+
+    def _cached_geometry(self):
+        """The viewport's own HLR arrays, when they are this scene's.
+
+        ``collect_geometry`` walks every face and edge in Python — 1.4 s
+        of a 1.8 s plan redraw on a three-thousand-element model, paid
+        again on every reload. The viewport already keeps the same
+        geometry in arrays (its pick index and edge chunks), and the
+        composer has always drawn sheets through it; the plan window asks
+        for the same arrays, and falls back to the walk when the viewport
+        is not showing this scene (a test's bare Scene).
+        """
+        viewport = getattr(self._window, "viewport", None)
+        if viewport is None or getattr(viewport, "scene", None) is not self._scene:
+            return None
+        probe = getattr(viewport, "hlr_geometry", None)
+        if not callable(probe):
+            return None
+        try:
+            return probe()
+        except Exception:                           # noqa: BLE001 — fallback
+            return None
 
     def _marks(self) -> list:
         """The opening tags and room stamps the plan carries."""
@@ -564,6 +687,7 @@ class PlanWindow(QDialog):
         x, y = float(point_mm[0]), float(point_mm[1])
         best = None
         best_d = 1e18
+        best_rank = 2
         for element in self._building.elements:
             if str(element.get("story_id")) != str(story["id"]):
                 continue
@@ -571,9 +695,16 @@ class PlanWindow(QDialog):
             pad = max(float(params.get("thickness_mm", 200.0) or 200.0) / 2.0,
                       float(params.get("width_mm", 0.0) or 0.0) / 2.0,
                       150.0)
-            d = _distance_to_element(element, x, y)
-            if d is not None and d <= pad and d < best_d:
-                best, best_d = str(element["id"]), d
+            d = _distance_to_element(element, x, y, self._building)
+            if d is None or d > pad:
+                continue
+            # An opening sits ON its wall and is drawn over it, so where
+            # both claim the point the opening wins — otherwise the click
+            # meant for the door selects the wall behind it and there is
+            # no way to pick the door at all.
+            rank = 0 if str(element.get("type")) in ("door", "window") else 1
+            if (rank, d) < (best_rank, best_d):
+                best, best_d, best_rank = str(element["id"]), d, rank
         return best
 
     def element_name_at(self, point_mm) -> str:
@@ -659,11 +790,13 @@ class PlanWindow(QDialog):
     def drag_element(self, element_id, point_mm, grab, kind: str) -> None:
         """Preview one drag step: move the body, or pull one end.
 
-        The preview is the model itself — the element's own parameters
-        change and the scene is resynced — so what the user sees while
-        dragging IS what the numbers say. Nothing goes through the
-        history until the drag ends, because a drag is ONE undo step and
-        a hundred steps of one millimetre are not what anybody wants.
+        The preview does NOT resync the scene: building the geometry of
+        three thousand elements takes ~7 s, and a drag would ask for it on
+        every mouse move. The moved parameters are computed from the
+        element as it stood when the drag began (adding the delta to the
+        already-moved element drifts by the whole path walked), the model
+        is left alone, and the canvas draws the element's own lines as a
+        dashed ghost. The scene is rebuilt ONCE, when the drag ends.
         """
         element = self._building.element(element_id) if self._building \
             else None
@@ -676,10 +809,8 @@ class PlanWindow(QDialog):
 
             self._drag_origin = (str(element_id),
                                  copy.deepcopy(self._scene.plugin_data))
-            # The BASE is the element as it stood when the drag began.
-            # Every move recomputes from it: adding the delta to the
-            # already-moved parameters drifts by the whole path walked.
             self._drag_base = copy.deepcopy(element.get("params") or {})
+            self._drag_rests = self._resting_projection(element)
         base = self._drag_base or {}
         dx = float(point_mm[0]) - float(grab[0])
         dy = float(point_mm[1]) - float(grab[1])
@@ -700,12 +831,47 @@ class PlanWindow(QDialog):
                 moved = {"baseline_start_mm": [round(float(b_start[0]) + dx),
                                                round(float(b_start[1]) + dy)]}
         else:
-            moved = self._moved_params(base, base, dx, dy)
+            moved = self._moved_params(base, dx, dy)
         if not moved:
             return
         self._pending = self._last_moved = moved
-        element.setdefault("params", {}).update(moved)
-        self._resync_preview()
+        self.canvas.set_ghost([(x0 + dx, y0 + dy, x1 + dx, y1 + dy)
+                               for x0, y0, x1, y1 in self._drag_rests])
+
+    def _resting_projection(self, element) -> list:
+        """The element's own edges as plan segments, from its rest mesh.
+
+        Drawn in the camera plane with the view target added back, which
+        is the same reconciliation ``build_drawing`` applies, so the ghost
+        sits exactly where the final linework will land.
+        """
+        if element is None:
+            return []
+        mesh = getattr(element, "_rest_mesh", None)
+        if mesh is None:
+            try:
+                from core.building.builder import build
+                mesh, _derived = build(self._building, element)
+            except Exception:                       # noqa: BLE001 — preview
+                return []
+            if mesh is None:
+                return []
+        target = self._view.target if self._view is not None else (0.0, 0.0, 0.0)
+        dx = float(target[0]) * 1000.0
+        dy = float(target[1]) * 1000.0
+        tz = float(target[2]) * 1000.0
+        out: list = []
+        for edge in mesh.edges:
+            a = edge.v0.position
+            b = edge.v1.position
+            # The plan looks down: keep what is near the cut, as the
+            # hidden-line pass does; a whole wall's box would otherwise
+            # draw its own floor and head as if they were the same line.
+            if abs(a.z() * 1000.0 - tz) > 1600.0 or abs(b.z() * 1000.0 - tz) > 1600.0:
+                continue
+            out.append((a.x() * 1000.0 + dx, a.y() * 1000.0 + dy,
+                        b.x() * 1000.0 + dx, b.y() * 1000.0 + dy))
+        return out
 
     def _near_end(self, element_id, point) -> str:
         """Which end a grab point is closer to, of the element's two."""
@@ -717,17 +883,7 @@ class PlanWindow(QDialog):
         de = math.hypot(ex - point[0], ey - point[1])
         return "start" if ds <= de else "end"
 
-    def _resync_preview(self) -> None:
-        """Redraw from the model as it now stands, without the history."""
-        from core.building.scene_sync import sync
-
-        try:
-            sync(self._scene)
-        except Exception as exc:                    # noqa: BLE001 — reported
-            self._say(f"{type(exc).__name__}: {exc}")
-        self.canvas.reload()
-
-    def _moved_params(self, element, params: dict, dx: float, dy: float) -> dict:
+    def _moved_params(self, params: dict, dx: float, dy: float) -> dict:
         """The parameters a body drag of ``(dx, dy)`` millimetres changes."""
         out: dict = {}
         start = params.get("baseline_start_mm")
@@ -750,10 +906,15 @@ class PlanWindow(QDialog):
     def finish_drag(self, element_id, grab, kind: str) -> None:
         """A drag ended: put the state back, then make ONE undo step of it."""
         del grab, kind
+        # The preview goes as soon as the drag is committed, whatever
+        # route the release took (the canvas clears its own copy too): a
+        # ghost left on the drawing would say the move never landed.
+        self.canvas.end_ghost()
         moved, self._last_moved = self._last_moved, None
         self._pending = None
         origin, self._drag_origin = self._drag_origin, None
         self._drag_base = None
+        self._drag_rests = []
         if not moved or origin is None or str(origin[0]) != str(element_id):
             return
         from core.building import commands as bim_commands
@@ -795,6 +956,45 @@ class PlanWindow(QDialog):
         dialog = PlanPropertiesDialog(self, element_id)
         dialog.exec()
         self.refresh()
+
+    def remove_element(self, element_id) -> None:
+        """Take one element out of the model — one undo step, as usual.
+
+        Removing a wall takes its openings with it (an opening's offsets
+        mean nothing without the wall it lives in). Both go in ONE
+        command, so one undo brings the wall back whole.
+        """
+        from core.building import commands as bim_commands
+        from core.building.scene_sync import sync
+
+        building = self._building
+        if building is None:
+            return
+        name = self.element_name_at(self._element_centre(element_id))
+        doomed = [str(element_id)]
+        if (building.element(element_id) or {}).get("type") == "wall":
+            doomed += [str(e["id"]) for e in building.elements
+                       if (e.get("params") or {}).get("host_wall_id")
+                       == str(element_id)]
+
+        def mutate(b) -> None:
+            for one in doomed:
+                b.remove_element(one)
+
+        command = bim_commands.BuildingEdit(mutate)
+        command._rebuild = lambda s, b: sync(s, b)
+        history = getattr(self._window.viewport, "history", None)
+        if history is None:
+            return
+        history.execute(command)
+        if history.last_error:
+            self._say(str(history.last_error))
+        self._pending = self._drag_origin = self._drag_base = None
+        self._selected = None
+        self.refresh()
+        self.select(None)
+        self._say(tr("Đã xoá %s") % (name or element_id))
+        self._notify_scene()
 
     # ---- the shortcut table ---------------------------------------------
     def show_shortcuts(self) -> None:
@@ -942,7 +1142,7 @@ class PlanPropertiesDialog(QDialog):
         self.accept()
 
 
-def _distance_to_element(element, x: float, y: float):
+def _distance_to_element(element, x: float, y: float, building=None):
     """How far a model point is from an element's own plan extent, in mm.
 
     ``None`` for an element with no extent to measure (a zone, whose area
@@ -950,12 +1150,32 @@ def _distance_to_element(element, x: float, y: float):
     """
     params = element.get("params") or {}
     kind = str(element.get("type"))
+    host = None
+    if kind in ("door", "window") and building is not None:
+        # An opening's own position is an offset ALONG ITS WALL, so the
+        # host's baseline is what says where it is on the plan.
+        host_row = building.element(str(params.get("host_wall_id") or ""))
+        hp = (host_row or {}).get("params") or {}
+        a, b = hp.get("baseline_start_mm"), hp.get("baseline_end_mm")
+        if a and b and len(a) >= 2 and len(b) >= 2:
+            u = float(params.get("offset_along_wall_mm", 0.0) or 0.0)
+            length = math.hypot(float(b[0]) - float(a[0]),
+                                float(b[1]) - float(a[1])) or 1.0
+            host = ((float(a[0]) + (float(b[0]) - float(a[0])) * u / length,
+                     float(a[1]) + (float(b[1]) - float(a[1])) * u / length),)
     if kind == "zone":
         outline = params.get("outline_mm") or []
         if len(outline) < 3:
             return None
         return 0.0 if _point_in(outline, x, y) else None
-    if kind in ("door", "window", "curtain_wall", "fixture"):
+    if kind in ("door", "window"):
+        centre = params.get("center_mm")
+        if (not centre or len(centre) < 2) and host:
+            centre = host[0]
+        if not centre:
+            return None
+        return math.hypot(float(centre[0]) - x, float(centre[1]) - y)
+    if kind in ("curtain_wall", "fixture"):
         centre = params.get("center_mm")
         if centre and len(centre) >= 2:
             return math.hypot(float(centre[0]) - x, float(centre[1]) - y)

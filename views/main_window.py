@@ -3174,10 +3174,15 @@ class MainWindow(QMainWindow):
         # as the sheet it came from.
         view = _drawings.view_for(building, {
             "kind": "story", "story_id": str(story["id"])})
+        # The file carries THIS storey's annotations and nobody else's: the
+        # document holds every storey's at once, and an export that wrote
+        # them all would print the floor above's levels on this plan.
+        view.annotation_key = f"dxf:{story['id']}"
         _drawings.annotate_plan(scene, building, view,
-                                key=f"dxf:{story['id']}")
+                                key=view.annotation_key)
         try:
-            counts = save_plan_dxf(path, scene, building, str(story["id"]))
+            counts = save_plan_dxf(path, scene, building, str(story["id"]),
+                                   annotation_key=view.annotation_key)
         except Exception as exc:                    # noqa: BLE001 — reported
             QMessageBox.warning(self, tr("Xuất DXF"),
                                 f"{type(exc).__name__}: {exc}")

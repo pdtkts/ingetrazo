@@ -174,6 +174,11 @@ def pattern_segments(rings, angle_deg: float, spacing_mm: float,
             if dash_mm and dash_mm > 0:
                 u = math.floor(u0 / dash_mm) * dash_mm
                 while u < u1:
+                    # The budget is checked INSIDE the dash loop: one long
+                    # chord across a big ring asks for thousands of dashes,
+                    # and the outer check only saw the family, not them.
+                    if len(out) >= limit:
+                        return out
                     a = max(u, u0)
                     b = min(u + dash_mm * 0.6, u1)
                     if b > a:

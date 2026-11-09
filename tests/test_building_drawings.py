@@ -488,3 +488,31 @@ def test_a_section_row_with_no_line_is_ignored():
                               {"symbol": "B", "story_id": story["id"],
                                "p1": [0.0, 0.0], "p2": [0.0, 0.0]}]
     assert section_marks(b, story) == []
+
+
+def test_re_issuing_a_plan_replaces_the_grid_lines_not_only_its_words():
+    """Re-issuing must not leave the last issue's axis lines standing: the
+    storey moves, the labels are replaced, and two sets of lines remain."""
+    from core.building.model import Building
+    from core.scene import Scene
+
+    b = Building()
+    s = b.add_story("T1", 0.0, 3300.0)
+    b.add_element("wall", s["id"], {
+        "baseline_start_mm": [0, 0], "baseline_end_mm": [6000, 0],
+        "thickness_mm": 200.0, "height_mm": 3300.0})
+    b.add_element("grid", s["id"], {
+        "axes": [{"name": "1", "dir": "y", "offset_mm": 0.0},
+                 {"name": "2", "dir": "y", "offset_mm": 4000.0},
+                 {"name": "A", "dir": "x", "offset_mm": 0.0},
+                 {"name": "B", "dir": "x", "offset_mm": 6000.0}]})
+    scene = Scene()
+    view = D.view_for(b, {"kind": "story", "story_id": s["id"]})
+    # The key is what the sheet issues the grid under; a re-issue uses the
+    # same one, which is what makes the second call a RE-issue.
+    D.draw_grid(scene, b, view, key="sheet·grid")
+    first = len(scene.mesh.edges)
+    b.story(s["id"])["z_mm"] = 1200.0
+    D.draw_grid(scene, b, view, key="sheet·grid")
+    assert len(scene.mesh.edges) == first, \
+        f"lưới trục còn lại của lần trước: {len(scene.mesh.edges)} nét"

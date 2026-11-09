@@ -70,6 +70,33 @@ LIST = (
     ("sheet_frame", "Sheet frame", "layout"),
     ("master_area", "Drawing area", "layout"),
     ("magnifier", "Magnifier", "layout"),
+    # ---- the plan window's own editing and drawing tools ----------------
+    # They live in this one catalogue so the bar, the shortcut table and
+    # the palette all read the same declaration; a bar that showed raw
+    # ids for a third of its buttons was reading a list that never
+    # mentioned them.
+    ("guide", "Guide", "select"),
+    ("protractor", "Protractor", "select"),
+    ("guideclr", "Clear guides", "select"),
+    ("measure", "Tape measure", "select"),
+    ("move", "Move", "edit"),
+    ("rotate", "Rotate", "edit"),
+    ("scale", "Scale", "edit"),
+    ("mirror", "Mirror", "edit"),
+    ("offset", "Offset edges", "edit"),
+    ("trim", "Trim", "edit"),
+    ("eraser", "Eraser", "edit"),
+    ("delete", "Delete", "edit"),
+    ("rect", "Rectangle", "draw"),
+    ("rrect", "Rotated rectangle", "draw"),
+    ("polygon", "Polygon", "draw"),
+    ("circle", "Circle", "draw"),
+    ("arc2", "Arc (2 points)", "draw"),
+    ("arc3", "Arc (3 points)", "draw"),
+    ("block", "Group 2D", "draw"),
+    # The registry's own word for a dimension is ``dimension``; the plan
+    # bar's id for the same command is ``dim``. Both resolve to one entry.
+    ("dim", "Dimension", "document"),
 )
 
 #: Groups of the plan window's vertical bar — ids in the order they appear.
