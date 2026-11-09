@@ -707,13 +707,24 @@ class PlanWindow(QDialog):
 
     def _tool_available(self, tool_key: str) -> bool:
         """Whether this command can run at all: the plan's own drafting
-        tools are always here, the rest are the application's."""
+        tools are always here, the SHEET's commands run against the sheet
+        in front of the composer, and the rest are the application's."""
         from views import draft_tools
 
         if str(tool_key) in draft_tools.DRAFT_TOOLS:
             return True
-        if str(tool_key) == "magnifier":
+        if str(tool_key) in ("magnifier",):
             return True
+        from views.main_window import SHEET_COMMANDS as _SHEET_REFS
+
+        sheet_commands = _SHEET_REFS
+        if sheet_commands and str(tool_key) in sheet_commands:
+            # A command of the SHEET: it needs a composer showing one, and
+            # the button saying so is more honest than a greyed one that
+            # never explains itself.
+            composer = getattr(self._window, "composer", None)
+            return composer is not None and \
+                getattr(composer, "comp", None) is not None
         return tool_key in getattr(self._window, "_tools", {})
 
     #: The drawing rule's own row (kind, storey, cut), kept so the drafting

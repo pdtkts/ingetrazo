@@ -218,3 +218,36 @@ def test_the_master_area_reports_the_sheet_s_own_numbers(monkeypatch):
         assert "0.0%" in text or "%" in text, text
     finally:
         win.hide()
+
+
+def test_the_plan_bar_offers_the_sheet_commands_only_when_a_sheet_is_open():
+    """«Vùng vẽ», «Khung tờ giấy» and «Vùng vẽ» are commands OF A SHEET, so
+    the plan bar shows them live only while the composer is showing one.
+    A button that is enabled and does nothing, or disabled and says
+    nothing, are the two failures this avoids."""
+    from core.building.samples import build_sample
+    from core.building.sheets import Composicion
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        build_sample(win.viewport.history, win.viewport.scene, "townhouse")
+        win._on_open_plan_window()
+        plan = win._plan_window
+        for key in ("region", "sheet_frame", "master_area"):
+            assert not plan._tool_available(key), key
+
+        class _Composer:
+            comp = Composicion(name="Tờ thử")
+
+            def refresh(self):
+                pass
+
+        win.composer = _Composer()
+        for key in ("region", "sheet_frame", "master_area"):
+            assert plan._tool_available(key), key
+        # The plan's own drawing tools are unaffected by any of this.
+        assert plan._tool_available("line")
+        assert plan._tool_available("circle")
+    finally:
+        win.hide()
