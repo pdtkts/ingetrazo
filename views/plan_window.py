@@ -63,6 +63,10 @@ def key_for_command(cmd_id: str) -> str:
 #: Plan command id → the application's own tool key. Only what the tool
 #: table actually has: the rest of the bar stays disabled and says so.
 COMMAND_TOOLS = {
+    # The plan's own 2D drawing (see views.draft_tools): these are handled
+    # INSIDE the plan window, because the points they need are plan points.
+    "dim": "dim", "level": "level", "text": "text", "label": "label",
+    "grid": "grid",
     "select": "select", "protractor": "protractor", "measure": "tape",
     "move": "move", "rotate": "rotate", "scale": "scale",
     "offset": "offset", "eraser": "eraser", "delete": "eraser",
@@ -209,6 +213,12 @@ class _Canvas(QWidget):
             return
         if event.button() == Qt.LeftButton:
             model = self.to_model(event.position())
+            # An armed drafting tool takes the click FIRST: while one is
+            # armed the plan is a drawing board, not a picker, and a press
+            # that also selected an element would draft and select at once.
+            if self._plan.draft_click(model[0], model[1]):
+                event.accept()
+                return
             hit = self._plan.element_at(model)
             if hit is not None and hit == self._selected:
                 # A second press ON the selected element takes its handle
@@ -241,7 +251,11 @@ class _Canvas(QWidget):
             self.update()
             event.accept()
             return
-        name = self._plan.element_name_at(self.to_model(event.position()))
+        model = self.to_model(event.position())
+        if getattr(self._plan, "_draft", None) is not None:
+            self._plan.draft_preview(model[0], model[1])
+            return
+        name = self._plan.element_name_at(model)
         self._plan.report_hover(name)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 — Qt
@@ -278,6 +292,10 @@ class _Canvas(QWidget):
                 event.accept()
                 return
         if event.key() == Qt.Key_Escape:
+            if getattr(self._plan, "_draft", None) is not None:
+                self._plan.cancel_draft()
+                event.accept()
+                return
             self._selected = None
             self._plan.select(None)
             self.update()
@@ -311,6 +329,9 @@ class _Canvas(QWidget):
         self._paint_loops(painter)
         self._paint_segs(painter)
         self._paint_marks(painter)
+        from views.draft_tools import paint_preview
+
+        paint_preview(painter, self, getattr(self._plan, "_draft", None))
         self._paint_ghost(painter)
         self._paint_handles(painter)
         painter.end()
@@ -505,9 +526,22 @@ class PlanWindow(QDialog):
         return COMMAND_TOOLS.get(str(cmd_id))
 
     def _run_tool(self, tool_key: str) -> None:
+        # A command the PLAN owns (the 2D drawing: dimension, level, text,
+        # label, grid) runs here, on the plan, because that is where its
+        # points come from. Everything else is the application's own tool,
+        # reached through the main window so it behaves identically.
+        cmd_id = self._cmd_for_tool(tool_key)
+        if cmd_id and self.arm_draft(cmd_id):
+            return
         activate = getattr(self._window, "_activate_tool", None)
         if callable(activate):
             activate(tool_key)
+
+    @staticmethod
+    def _cmd_for_tool(tool_key: str) -> str:
+        from views import draft_tools
+
+        return str(tool_key) if tool_key in draft_tools.DRAFT_TOOLS else ""
 
     # ---- reading the model ----------------------------------------------
     def refresh(self) -> None:
@@ -531,8 +565,17 @@ class PlanWindow(QDialog):
         self._on_story()
 
     def _tool_available(self, tool_key: str) -> bool:
-        """Whether the application actually has this tool loaded."""
+        """Whether this command can run at all: the plan's own drafting
+        tools are always here, the rest are the application's."""
+        from views import draft_tools
+
+        if str(tool_key) in draft_tools.DRAFT_TOOLS:
+            return True
         return tool_key in getattr(self._window, "_tools", {})
+
+    #: The drawing rule's own row (kind, storey, cut), kept so the drafting
+    #: tools can ask the SAME rule the screen is drawn with.
+    _view_row: dict = {}
 
     def _on_story(self) -> None:
         self._story_id = str(self.story_box.currentData() or "")
@@ -541,8 +584,8 @@ class PlanWindow(QDialog):
             self._view = None
             self.canvas.reload()
             return
-        self._view = _drawings.view_for(
-            self._building, {"kind": "story", "story_id": self._story_id})
+        self._view_row = {"kind": "story", "story_id": self._story_id}
+        self._view = _drawings.view_for(self._building, self._view_row)
         self.scale_box.blockSignals(True)
         self.scale_box.setValue(int(self._view.scale_denom))
         self.scale_box.blockSignals(False)
@@ -734,6 +777,71 @@ class PlanWindow(QDialog):
             if group is not None:
                 scene.select([group])
         self._notify_scene()
+
+    # ---- drafting on the plan -------------------------------------------
+    #: The 2D tool that is armed, if any — see ``views.draft_tools``. It is
+    #: the workspace's answer to "dimension", "level", "text", "label" and
+    #: "grid": the plan's own drawing, written as DATA into the document.
+    _draft = None
+
+    def arm_draft(self, cmd_id: str) -> bool:
+        """Arm one of the plan's own drafting tools. ``False`` if this
+        command is not one of them."""
+        from views import draft_tools
+
+        found = draft_tools.tool_for(cmd_id, self)
+        if found is None:
+            return False
+        self._draft = found
+        self._say(tr(found.hint or cmd_id))
+        canvas = getattr(self, "canvas", None)
+        if canvas is not None:
+            canvas.setCursor(Qt.CrossCursor)
+            canvas.update()
+        return True
+
+    def cancel_draft(self) -> None:
+        self._draft = None
+        canvas = getattr(self, "canvas", None)
+        if canvas is not None:
+            canvas.unsetCursor()
+            canvas.update()
+
+    def draft_click(self, x_mm: float, y_mm: float) -> bool:
+        """Hand a click to the armed tool. ``True`` if it took it."""
+        if self._draft is None:
+            return False
+        done = self._draft.click(x_mm, y_mm)
+        if done:
+            self.cancel_draft()
+            self.refresh()
+        return True
+
+    def draft_preview(self, x_mm: float, y_mm: float) -> None:
+        canvas = getattr(self, "canvas", None)
+        if canvas is None or self._draft is None:
+            return
+        canvas._tool_preview = self._draft.preview(x_mm, y_mm)
+        canvas.update()
+
+    def _write(self, command) -> None:
+        """Write one drafting command — through the SAME History as the 3D,
+        so a dimension drawn here is one undo step and lands in the file."""
+        history = getattr(self._window.viewport, "history", None)
+        if history is None:
+            return
+        history.execute(command)
+        error = getattr(history, "last_error", None)
+        if error:
+            self._say(str(error))
+        self._notify_scene()
+
+    def view_rule(self):
+        """The drawing rule this plan is being read by."""
+        from core.building import drawings as _drawings
+
+        row = self._view_row or {"kind": "story", "story_id": self._story_id}
+        return _drawings.view_for(self._building, row)
 
     def _notify_scene(self) -> None:
         """Let the whole app see what the plan just changed.
