@@ -89,6 +89,14 @@ class BuildingEdit(Command):
         if self._mesh_before is not None:
             scene.mesh.restore_state(self._mesh_before)
         self._apply_payload(scene, self._before_payload)
+        # The payload is back but the SCENE geometry is not: a rebuilt
+        # group (a wall's body, a door's cut) lives in scene.groups, and
+        # restoring the mesh snapshot does not touch it. Without this the
+        # parameter would say 200 mm while the wall stood 400 mm thick —
+        # and the drawings and the IFC read the mesh, so the picture and
+        # the numbers would disagree after an undo.
+        if self._rebuild is not None:
+            self._rebuild(scene, self._live(scene))
         scene.version += 1
 
     @staticmethod

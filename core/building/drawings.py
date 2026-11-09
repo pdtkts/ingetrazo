@@ -220,6 +220,13 @@ def _trim(name, n, point_mm) -> SectionPlane:
     return sp
 
 
+def _mm_or(raw, default: float) -> float:
+    """A millimetre value where 0 IS a value — the plan cut is measured
+    from the storey floor, so ``cut_mm: 0`` means "cut at the floor"
+    (what a beam layout needs) and must not fall back to the default."""
+    return float(default) if raw is None else float(raw)
+
+
 def _mm_vec(row, key, fallback=(0.0, 0.0)) -> tuple:
     v = row.get(key)
     if not v or len(v) < 2:
@@ -301,11 +308,11 @@ def view_for(building, row: dict, scale_denom: float | None = None,
     if kind in (KIND_STORY, KIND_ROOF):
         story, z, top = _story_marks(building, row)
         if kind == KIND_ROOF:
-            cut = float(row.get("cut_mm") or ROOF_CUT_MM)
-            lower = float(row.get("cut_bottom_mm") or DEFAULT_CUT_BOTTOM_MM)
+            cut = _mm_or(row.get("cut_mm"), ROOF_CUT_MM)
+            lower = _mm_or(row.get("cut_bottom_mm"), DEFAULT_CUT_BOTTOM_MM)
         else:
-            cut = float(row.get("cut_mm") or DEFAULT_CUT_MM)
-            lower = float(row.get("cut_bottom_mm") or DEFAULT_CUT_BOTTOM_MM)
+            cut = _mm_or(row.get("cut_mm"), DEFAULT_CUT_MM)
+            lower = _mm_or(row.get("cut_bottom_mm"), DEFAULT_CUT_BOTTOM_MM)
         return _plan_view(building, row, story, z, name, scale_denom,
                           frame_h_mm, cut=cut, trim=z + lower)
     return _directional_view(building, row, kind, name, scale_denom,
@@ -578,7 +585,7 @@ def draw_grid(scene, building, view: DrawingView, *, history=None,
         return []
     _grid_pen(scene)
     z_cut = (float(story.get("z_mm", 0.0))
-             + float(view.row.get("cut_mm") or DEFAULT_CUT_MM)) / 1000.0
+             + _mm_or(view.row.get("cut_mm"), DEFAULT_CUT_MM)) / 1000.0
     made: list = []
     for name, direction, offset, lo, hi in axes:
         a = QVector3D(lo / 1000.0, offset / 1000.0, z_cut)
@@ -749,8 +756,8 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
                 # millimetres it must be pulled, plus half the wall to clear
                 # the centreline the baseline runs along.
                 reach = (float(a[2]) / 2.0 + stand_off * denom) / 1000.0
-                z_cut = (story_z + float(view.row.get("cut_mm")
-                                        or DEFAULT_CUT_MM)) / 1000.0
+                z_cut = (story_z + _mm_or(view.row.get("cut_mm"),
+                                          DEFAULT_CUT_MM)) / 1000.0
                 dim = Dimension(
                     QVector3D(a[0] / 1000.0, a[1] / 1000.0, z_cut),
                     QVector3D(b[0] / 1000.0, b[1] / 1000.0, z_cut),
@@ -798,8 +805,8 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
         # on the annotation layer with the dimensions and the room stamps.
         label = TextLabel(
             QVector3D(mx / 1000.0, my / 1000.0,
-                      (story_z + float(view.row.get("cut_mm")
-                                       or DEFAULT_CUT_MM)) / 1000.0),
+                      (story_z + _mm_or(view.row.get("cut_mm"),
+                                        DEFAULT_CUT_MM)) / 1000.0),
             QVector3D(0.0, 0.0, 0.0), mark, layer=ANNOT_LAYER)
         add(AddTextLabelCommand(label), label, scene.text_labels)
 
@@ -822,8 +829,8 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
             text = name if area is None else f"{name}\n{area:.2f} m²"
             label = TextLabel(
                 QVector3D(cx / 1000.0, cy / 1000.0,
-                          (story_z + float(view.row.get("cut_mm")
-                                           or DEFAULT_CUT_MM)) / 1000.0),
+                          (story_z + _mm_or(view.row.get("cut_mm"),
+                                            DEFAULT_CUT_MM)) / 1000.0),
                 QVector3D(0.0, 0.0, 0.0), text, layer=ANNOT_LAYER)
             add(AddTextLabelCommand(label), label, scene.text_labels)
     return added

@@ -284,8 +284,10 @@ def build_roof(building, element) -> tuple[Mesh, dict]:
         return max(d, 0.0) * tan_s
 
     mesh = Mesh()
-    frame = Frame((0.0, 0.0, pivot), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0),
-                  perp=(0.0, 1.0, 0.0))
+    # Same frame choice as the slab: the outline is the PLAN and `w` is
+    # the thickness, lifted by the slope — a roof is a plate, not a wall.
+    frame = Frame((0.0, 0.0, pivot), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0),
+                  perp=(0.0, 0.0, 1.0))
     top = [frame.point(p[0], p[1], lift(p)) for p in plan]
     bottom = [frame.point(p[0], p[1], lift(p) - thickness) for p in plan]
     mesh.add_face(top)

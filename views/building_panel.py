@@ -276,14 +276,20 @@ class BuildingPanel(QWidget):
             row.setText(1, "" if value is None else str(value))
 
     def _emit(self, command) -> None:
-        """Commit a building edit and let the whole app see the change."""
+        """Commit a building edit and let the whole app see the change.
+
+        The geometry rebuild is handed to the COMMAND rather than called
+        after it: run inside the step, its result is part of the step's own
+        snapshot, so undo and redo restore the picture with the parameters.
+        """
         scene = self._scene()
+        if getattr(command, "_rebuild", None) is None:
+            command._rebuild = lambda s, b: sync(s, b)
         history = getattr(self._window.viewport, "history", None)
         if history is not None:
             history.execute(command)
         else:
             command.do(scene)
-        sync(scene, building_model.building_of(scene))
         notify = getattr(self._window, "on_scene_changed", None)
         if callable(notify):
             notify()

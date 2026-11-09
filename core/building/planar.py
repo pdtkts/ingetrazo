@@ -154,7 +154,11 @@ def side_offsets(params) -> tuple:
     else:
         near = -t / 2.0
     if params.get("flip_side"):
-        return (near + t, near)
+        # Mirror the body about the reference line: the wall that stood to
+        # the line's left now stands to its right. Swapping the two ends
+        # (what this used to do) leaves the same interval — the same body
+        # — so the switch did nothing on any wall.
+        return (-(near + t), -near)
     return (near, near + t)
 
 
@@ -181,8 +185,10 @@ def inset_footprint(footprint, amount: float):
 def join_input(wall_id, params, baseline, story_z: float, height_mm: float):
     """One wall as the solver wants it: ends, face offsets, priority, Z range."""
     p0, p1 = baseline
+    # Signed, in the wall's own (near, far) order: the solver compares each
+    # face's line against its neighbour's, and collapsing the pair with
+    # min/max makes a face-referenced wall lose which side it stands on.
     lo, hi = side_offsets(params)
-    lo, hi = min(lo, hi), max(lo, hi)
     base = float(story_z) + float(params.get("base_offset_mm", 0.0))
     from core.building import elements as schemas
     return {
@@ -436,7 +442,11 @@ def _stop_faces(own, other, other_off):
     limit = MAX_EXTEND_FACTOR * max(thickness, 1.0) + TOL
     if max(abs(u_a), abs(u_b)) > own["len"] + limit:
         return None
-    return (min(u_a, u_b), max(u_a, u_b))
+    # Face ORDER, not sorted: the caller reads this pair back by face
+    # (``_wall_ends`` maps [0] to the near face and [1] to the far one),
+    # and a min/max here silently swaps them at any mitre that extends one
+    # face past the other — the joint would be built mirrored.
+    return (u_a, u_b)
 
 
 def _trim_to_face(own, at_end, other):
@@ -477,7 +487,7 @@ def _miter(own, at_end, other):
     u_b = _line_param(own, own["w"]["hi"], point, line_dir)
     if u_a is None or u_b is None:
         return None
-    return (min(u_a, u_b), max(u_a, u_b))
+    return (u_a, u_b)                 # face order — see _stop_faces
 
 
 # ---- region detection -------------------------------------------------------

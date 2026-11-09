@@ -191,7 +191,7 @@ def generate_docset(scene, building, project=None, story_ids=None,
                 ("plan", "Mặt bằng", None, None),
                 ("wall", "Mặt bằng tường", "wall", None),
                 ("floor", "Mặt bằng lát sàn", "slab", None),
-                ("ceiling", "Mặt bằng trần", "ceiling", 0.0)):
+                ("ceiling", "Mặt bằng trần", "ceiling", "ceiling")):
             sheet = next((s for s in made
                           if _sheets_code_group(s) == key
                           and story_name in str(s.name)), None)
@@ -199,7 +199,16 @@ def generate_docset(scene, building, project=None, story_ids=None,
                 continue
             row = {"kind": "story", "story_id": sid,
                    "name": f"{label_extra} {story_name}"}
-            if cut is not None:
+            if cut == "ceiling":
+                # A ceiling plan looks DOWN onto the ceiling, so its cut
+                # rides above the ceiling plane — at the ceiling's own
+                # height a reader would see nothing but the plane of it.
+                heights = [float((e.get("params") or {}).get("height_mm")
+                                 or 2900.0) for e in building.elements
+                           if str(e.get("story_id")) == sid
+                           and e.get("type") == "ceiling"]
+                row["cut_mm"] = (max(heights) if heights else 2900.0) + 100.0
+            elif cut is not None:
                 row["cut_mm"] = cut
             view = _drawings.view_for(building, row)
             if show is not None:
@@ -468,7 +477,7 @@ def _fill_cover(sheet, project: dict, building) -> None:
     story_count = len(building.stories)
     total_h = sum(float(s.get("height_mm", 3300.0))
                   for s in building.stories)
-    body = "\\n".join(
+    body = "\n".join(
         line for line in (
             str(project.get("name") or ""),
             str(project.get("address") or ""),

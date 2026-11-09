@@ -167,13 +167,18 @@ class BimSession:
         def rebuild(scene, building):
             scene_sync.sync(scene, building)
 
+        # The hook goes ON the command, not after it: the command runs it
+        # inside its own step, so the snapshot covers the rebuilt geometry
+        # and undo/redo restore the picture as well as the parameters.
+        # Calling sync() after execute() leaves the step's snapshot blind
+        # to the geometry it just built.
+        if getattr(command, "_rebuild", None) is None:
+            command._rebuild = rebuild
         history = self._history or getattr(self._viewport, "history", None)
         if history is not None:
             history.execute(command)
-            rebuild(self.scene, self.building)
         else:
             command.do(self.scene)
-            rebuild(self.scene, self.building)
 
     def _last(self, kind: str) -> dict:
         found = self.elements(kind)

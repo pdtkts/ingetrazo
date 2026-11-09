@@ -131,3 +131,115 @@ def test_a_fixture_is_turned_by_its_angle(two_storeys):
     # Turned 90°, the body's 700 mm depth now runs along X.
     assert max(xs) - min(xs) == pytest.approx(700.0, abs=1.0)
     assert derived["volume_m3"] == pytest.approx(0.2044, abs=1e-4)
+
+
+def test_the_reference_line_places_the_wall_body():
+    """«Đường chuẩn» is the line the plan draws and the office measures
+    from: left, centre or right of the body. All three must build, and each
+    must put the body somewhere different."""
+    from core.building.builder import build
+    from core.building.model import Building
+
+    def span(ref, flip=False):
+        b = Building()
+        story = b.add_story("T", 0.0, 3300.0)
+        wall = b.add_element("wall", story["id"], {
+            "baseline_start_mm": [0, 0], "baseline_end_mm": [4000, 0],
+            "thickness_mm": 200.0, "height_mm": 3300.0,
+            "reference_line": ref, "flip_side": flip})
+        mesh, _derived = build(b, wall)
+        ys = [v.y() for f in mesh.faces for v in f.vertices]
+        return (min(ys), max(ys))
+
+    # The scene is metres: a 200 mm wall spans ±0.1 m about its centreline,
+    # and hugs one side when the reference line is a face.
+    lo_center, hi_center = span("center")
+    assert abs(lo_center + 0.1) < 1e-3 and abs(hi_center - 0.1) < 1e-3
+    lo_left, hi_left = span("left")
+    assert abs(lo_left) < 1e-3 and abs(hi_left - 0.2) < 1e-3
+    lo_right, hi_right = span("right")
+    assert abs(lo_right + 0.2) < 1e-3 and abs(hi_right) < 1e-3
+    # Flipping mirrors the body about the baseline: a centred wall is
+    # symmetric about it, a face-referenced wall hops to the other side —
+    # which is the whole point of the switch.
+    assert span("center", flip=True) == (lo_center, hi_center)
+    assert span("left", flip=True) == (lo_right, hi_right), "lật mặt đổi phía"
+    assert span("right", flip=True) == (lo_left, hi_left)
+
+
+def test_the_base_offset_raises_the_whole_body():
+    from core.building.builder import build
+    from core.building.model import Building
+
+    b = Building()
+    story = b.add_story("T", 1000.0, 3300.0)
+    wall = b.add_element("wall", story["id"], {
+        "baseline_start_mm": [0, 0], "baseline_end_mm": [4000, 0],
+        "thickness_mm": 200.0, "height_mm": 3300.0,
+        "base_offset_mm": 600.0})
+    mesh, derived = build(b, wall)
+    zs = [v.z() for f in mesh.faces for v in f.vertices]
+    assert abs(min(zs) - 1.6) < 1e-6, "đáy tường phải nâng 600 mm"
+
+
+def test_a_wall_whose_base_follows_the_storey_above():
+    """«Đỉnh bám tầng trên»: raise the next storey and this wall grows to
+    meet it, which is what makes a storey height a single number."""
+    from core.building.builder import build
+    from core.building.model import Building
+
+    b = Building()
+    ground = b.add_story("T1", 0.0, 3300.0)
+    b.add_story("T2", 3300.0, 3600.0)
+    wall = b.add_element("wall", ground["id"], {
+        "baseline_start_mm": [0, 0], "baseline_end_mm": [4000, 0],
+        "thickness_mm": 200.0, "top_link": "next"})
+    _mesh, derived = build(b, wall)
+    assert abs(derived["effective_height_mm"] - 3300.0) < 1.0
+    # The next storey moves up: the wall follows it, not its own height.
+    b.stories[1]["z_mm"] = 3600.0
+    _mesh, again = build(b, wall)
+    assert abs(again["effective_height_mm"] - 3600.0) < 1.0
+
+
+def test_a_horizontal_element_lies_in_the_plan_not_on_its_edge():
+    """A slab, a ceiling and a roof are PLATES: the outline is the plan and
+    the thickness runs vertically.
+
+    Reading the frame the other way stands the plate on its edge, and no
+    quantity notices — every takeoff and IFC number comes from the outline
+    millimetres, so the numbers stay right while the picture (the scene,
+    every drawing, every sheet) is wrong. These assertions look at the
+    WORLD extents, which is the only place that failure shows.
+    """
+    from core.building.builder import build
+    from core.building.model import Building
+
+    b = Building()
+    story = b.add_story("T1", 0.0, 3300.0)
+    b.add_story("T2", 3300.0, 3300.0)
+    outline = [[0, 0], [6000, 0], [6000, 4000], [0, 4000]]
+
+    def extents(kind, params):
+        element = b.add_element(kind, story["id"], {**params,
+                                                    "outline_mm": outline})
+        mesh, _derived = build(b, element)
+        xs = [v.x() for f in mesh.faces for v in f.vertices]
+        ys = [v.y() for f in mesh.faces for v in f.vertices]
+        zs = [v.z() for f in mesh.faces for v in f.vertices]
+        return (min(xs), max(xs), min(ys), max(ys), min(zs), max(zs))
+
+    x0, x1, y0, y1, z0, z1 = extents("slab", {"thickness_mm": 120.0})
+    assert (round(x0), round(x1), round(y0), round(y1)) == (0, 6, 0, 4)
+    assert abs((z1 - z0) - 0.12) < 1e-3, "sàn phải dày theo phương đứng"
+
+    x0, x1, y0, y1, z0, z1 = extents("ceiling", {
+        "thickness_mm": 9.0, "height_mm": 2900.0})
+    assert (round(x0), round(x1), round(y0), round(y1)) == (0, 6, 0, 4)
+    assert abs((z1 - z0) - 0.009) < 1e-3, "trần phải mỏng theo phương đứng"
+    assert abs(z0 - 2.9) < 1e-3, "trần nằm ở cao độ trần"
+
+    x0, x1, y0, y1, _z0, z1 = extents("roof", {
+        "thickness_mm": 200.0, "slope_deg": 0.0, "overhang_mm": 0.0})
+    assert (round(x0), round(x1), round(y0), round(y1)) == (0, 6, 0, 4)
+    assert abs(z1 - z0) < 1e-3 or (z1 - min(_z0, z1)) <= 0.21

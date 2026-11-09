@@ -89,12 +89,18 @@ def build_wall(building, element, joins=None) -> tuple[Mesh, dict]:
     ends = _wall_ends(joins, element, length, lo, hi)
     floors, holes = _wall_openings(building, element, height)
 
-    faces = wall_solid_faces(ends, height, thickness, floors, holes)
+    # The body is built in LOCal w = [0, t]; the frame's w0 places its near
+    # face. The two offsets are signed (a wall referenced to one face has
+    # its body on one side of the baseline), so the span is their
+    # difference — using the thickness alone would ignore flip_side and a
+    # face reference entirely.
+    span = abs(hi - lo) or thickness
+    faces = wall_solid_faces(ends, height, span, floors, holes)
 
     frame = world_frame((float(p0[0]), float(p0[1]),
                          base_z(building, params, story)),
                         (float(p1[0]) - float(p0[0]),
-                         float(p1[1]) - float(p0[1])), w0=lo)
+                         float(p1[1]) - float(p0[1])), w0=min(lo, hi))
     mesh = Mesh()
     for outer, hole_loops in faces:
         mesh.add_face(frame.loop(outer),
@@ -113,9 +119,14 @@ def build_wall(building, element, joins=None) -> tuple[Mesh, dict]:
 
 
 def schemas_side_offsets(params) -> tuple:
+    """``(near, far)`` face offsets, SIGNED and in face order.
+
+    Not sorted: ``flip_side`` and a face-referenced baseline both express
+    themselves by which offset is which, and a min/max here throws that
+    away — the wall would then be built as if it were centred.
+    """
     from core.building.planar import side_offsets
-    lo, hi = side_offsets(params)
-    return min(lo, hi), max(lo, hi)
+    return side_offsets(params)
 
 
 def _wall_ends(joins, element, length, lo, hi):
@@ -275,8 +286,13 @@ def build_slab(building, element) -> tuple[Mesh, dict]:
     thickness = float(params.get("thickness_mm", 120.0) or 0.0)
     z = float(story.get("z_mm", 0.0)) + float(
         params.get("top_offset_mm", 0.0) or 0.0)
-    frame = Frame((0.0, 0.0, z), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0),
-                  perp=(0.0, 1.0, 0.0))
+    # up = +Y and perp = +Z: the outline's own (x, y) is the PLAN and the
+    # thickness runs along -Z, which is what makes a slab a floor. Reading
+    # it the other way (up = Z) stands the plate on its edge — a picture
+    # nobody notices in the numbers, because the quantities come from the
+    # outline alone.
+    frame = Frame((0.0, 0.0, z), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0),
+                  perp=(0.0, 0.0, 1.0))
     mesh = _slab_mesh(frame, outline, holes, thickness, top=True)
     area = _areas(outline, holes)
     return mesh, {
@@ -298,8 +314,8 @@ def build_ceiling(building, element) -> tuple[Mesh, dict]:
     thickness = float(params.get("thickness_mm", 9.0) or 9.0)
     z = base_z(building, params, story) + float(
         params.get("height_mm", 2900.0) or 2900.0)
-    frame = Frame((0.0, 0.0, z), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0),
-                  perp=(0.0, 1.0, 0.0))
+    frame = Frame((0.0, 0.0, z), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0),
+                  perp=(0.0, 0.0, 1.0))
     cut = params.get("cut_mm") or []
     mesh = _slab_mesh(frame, outline, cut, max(thickness, 1.0), top=False)
     area = _areas(outline, cut)
@@ -439,9 +455,17 @@ def build(building, element):
 
 
 def joins_for_story(building, story_id: str) -> dict:
-    """Solve every wall join on one storey (cached on the building object)."""
+    """Solve every wall join on one storey (cached on the building object).
+
+    The key FINGERPRINTS the geometry the solver reads — every wall's
+    baseline, thickness and material on the storey, plus the storey's own
+    elevation. A count of elements is not enough: moving one partner wall
+    changes the join at its neighbour without changing any count, and a
+    stale trim then reaches the scene, the drawings and the IFC.
+    """
     cache = getattr(building, "_joins_cache", None)
-    key = (story_id, len(building.elements), len(building.stories))
+    key = (story_id, len(building.elements),
+           _joins_fingerprint(building, story_id))
     if cache is not None and cache[0] == key:
         return cache[1]
     from core.building.planar import join_input, join_walls
@@ -458,6 +482,23 @@ def joins_for_story(building, story_id: str) -> dict:
     result = join_walls(inputs)
     building._joins_cache = (key, result)
     return result
+
+
+def _joins_fingerprint(building, story_id: str):
+    """A hashable digest of what the join solver reads on one storey."""
+    story = building.story(story_id)
+    z = float((story or {}).get("z_mm", 0.0))
+    parts: list = [("z", z), ("stories", len(building.stories))]
+    for el in building.on_story(story_id, "wall"):
+        params = el.get("params") or {}
+        p0 = tuple(round(float(v), 3) for v in
+                   (params.get("baseline_start_mm") or (0.0, 0.0))[:2])
+        p1 = tuple(round(float(v), 3) for v in
+                   (params.get("baseline_end_mm") or (0.0, 0.0))[:2])
+        parts.append((str(el.get("id")), p0, p1,
+                      round(float(params.get("thickness_mm", 200.0) or 0.0), 3),
+                      int(schemas.priority_of(params))))
+    return tuple(parts)
 
 
 #: Builders for the element types whose geometry modules are heavier
