@@ -202,7 +202,18 @@ def test_the_dxf_action_writes_a_drawing(window, tmp_path, monkeypatch):
     assert path.exists()
     import ezdxf
     doc = ezdxf.readfile(str(path))
-    assert any(e.dxftype() == "LINE" for e in doc.modelspace())
+    msp = doc.modelspace()
+    kinds = {}
+    for entity in msp:
+        kinds[entity.dxftype()] = kinds.get(entity.dxftype(), 0) + 1
+    # The drawing the office sends has all four: linework, the section
+    # hatch, the dimensions and the text. Asserting only "some LINE
+    # exists" would pass with three of them silently gone.
+    assert kinds.get("LINE", 0) > 0
+    assert kinds.get("HATCH", 0) > 0, "mặt cắt phải có hatch"
+    assert kinds.get("DIMENSION", 0) > 0, "phải có kích thước"
+    layers = {e.dxf.layer for e in msp}
+    assert "KT-CUT" in layers and "KT-HATCH" in layers
 
 
 def test_the_docset_screen_shows_the_check_before_it_runs(window):

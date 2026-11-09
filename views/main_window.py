@@ -3152,6 +3152,15 @@ class MainWindow(QMainWindow):
             tr("DXF (*.dxf)"))
         if not path:
             return
+        # The office's DXF carries the drawing's LANGUAGE, not just its
+        # linework: the opening marks, the dimension chains and the room
+        # stamps are written into the document the same way the issued
+        # sheet writes them, so the file a colleague opens reads the same
+        # as the sheet it came from.
+        view = _drawings.view_for(building, {
+            "kind": "story", "story_id": str(story["id"])})
+        _drawings.annotate_plan(scene, building, view,
+                                key=f"dxf:{story['id']}")
         try:
             counts = save_plan_dxf(path, scene, building, str(story["id"]))
         except Exception as exc:                    # noqa: BLE001 — reported
