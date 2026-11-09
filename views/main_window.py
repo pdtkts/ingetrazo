@@ -283,7 +283,7 @@ OPEN_PLAN_COMMANDS = _open_plan_commands()
 
 #: Layout commands the WINDOW runs itself (they act on the sheet in front
 #: of the composer, which only the composer knows).
-SHEET_COMMANDS = frozenset({"sheet_frame"})
+SHEET_COMMANDS = frozenset({"sheet_frame", "region", "master_area"})
 
 
 #: Where a registry command's own id differs from the app's tool key.
@@ -3290,6 +3290,89 @@ class MainWindow(QMainWindow):
             return
         if cmd_id == "sheet_frame":
             self._add_sheet_frame(sheet)
+        elif cmd_id == "region":
+            self._place_region_on_sheet(sheet, composer)
+        elif cmd_id == "master_area":
+            self._master_area(sheet, composer)
+
+    def _place_region_on_sheet(self, sheet, composer) -> None:
+        """Put the storey being drawn onto the sheet in front.
+
+        «Vùng vẽ» is the office's own gesture: the model has the drawing
+        already — the storey, its cut, its scale — and what is missing is
+        that drawing ON this sheet. So it is placed as a RULE (the same
+        scene + frame an issued set makes), which keeps agreeing with the
+        model after it is edited; a screenshot would not.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        from core.building import drawings as _drawings
+        from core.building.model import building_of
+
+        scene = self.viewport.scene
+        building = building_of(scene)
+        story_id = ""
+        plan = getattr(self, "_plan_window", None)
+        if plan is not None:
+            story_id = str(getattr(plan, "_story_id", "") or "")
+        if not story_id and building.stories:
+            active = building.active_story()
+            story_id = str((active or building.stories[0]).get("id") or "")
+        if not story_id:
+            QMessageBox.information(
+                self, tr("Vùng vẽ"),
+                tr("Mô hình chưa có tầng nào — dựng tầng trước đã."))
+            return
+        view = _drawings.view_for(building,
+                                  {"kind": "story", "story_id": story_id})
+        try:
+            _drawings.place_on_sheet(sheet, view, scene)
+        except Exception as exc:                    # noqa: BLE001 — reported
+            QMessageBox.warning(self, tr("Vùng vẽ"),
+                                f"{type(exc).__name__}: {exc}")
+            return
+        if hasattr(composer, "refresh"):
+            composer.refresh()
+        self.viewport.notify_scene_changed()
+        story = building.story(story_id) or {}
+        QMessageBox.information(
+            self, tr("Vùng vẽ"),
+            tr("Đã đặt «%s» lên tờ «%s» — bản vẽ đi theo mô hình, không "
+               "phải ảnh chụp.")
+            % (str(story.get("name") or story_id), str(sheet.name or "")))
+
+    def _master_area(self, sheet, composer) -> None:
+        """The drawing area's own numbers, where a draughtsman looks for
+        them: the sheet's size, its margins, how much of it the drawings
+        actually cover, and the scales in use."""
+        from PySide6.QtWidgets import QMessageBox
+
+        page_w, page_h = sheet.page_size_mm()
+        margin = float(getattr(sheet, "margin_mm", 10.0) or 0.0)
+        inner_w = max(0.0, page_w - 2.0 * margin)
+        inner_h = max(0.0, page_h - 2.0 * margin)
+        used = 0.0
+        scales = set()
+        for frame in getattr(sheet, "frames", None) or ():
+            used += float(getattr(frame, "w_mm", 0.0) or 0.0) *                 float(getattr(frame, "h_mm", 0.0) or 0.0)
+            try:
+                scales.add(float(getattr(frame, "scale_n", 0.0) or 0.0))
+            except (TypeError, ValueError):          # pragma: no cover
+                continue
+        area = inner_w * inner_h
+        return_area = (used / area * 100.0) if area > 0.0 else 0.0
+        scales.discard(0.0)
+        QMessageBox.information(
+            self, tr("Vùng vẽ"),
+            tr("Tờ «%s»: khổ %s %s, %.0f × %.0f mm, lề %.0f mm\n"
+               "Vùng vẽ %.0f × %.0f mm — đã dùng %.1f%%.\n"
+               "%d khung, tỷ lệ: %s")
+            % (str(sheet.name or ""), str(sheet.paper or ""),
+               tr("ngang") if getattr(sheet, "landscape", True)
+               else tr("đứng"),
+               inner_w, inner_h, margin, inner_w, inner_h, return_area,
+               len(getattr(sheet, "frames", None) or ()),
+               ", ".join(f"1:{n:g}" for n in sorted(scales)) or tr("chưa có")))
 
     def _add_sheet_frame(self, sheet) -> None:
         """The office's border and title block, on the sheet in front."""

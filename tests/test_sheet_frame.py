@@ -125,3 +125,96 @@ def test_the_command_runs_from_the_registry_entry(window, monkeypatch):
     assert sheet.cajetin is not None
     assert dict(sheet.cajetin.campos)["CÔNG TRÌNH"] == "Nhà phố kiểm tra"
     composer.hide()
+
+
+# ---- «Vùng vẽ» and «Vùng vẽ» (the drawing area) -------------------------------
+
+def test_a_region_places_a_rule_backed_drawing_on_the_sheet(monkeypatch):
+    """«Vùng vẽ» puts the storey being drawn on the sheet in front — as a
+    RULE (scene + frame), the way an issued set does it, so the drawing
+    keeps agreeing with the model after it is edited. A screenshot would
+    not, and the difference is the whole point of the command."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from core.building import samples as _samples
+    from core.building.model import building_of
+    from core.building.sheets import Composicion
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        _samples.build_sample(win.viewport.history, win.viewport.scene,
+                              "townhouse")
+        scene = win.viewport.scene
+        sheet = Composicion(name="Tờ thử", paper="A3", landscape=True)
+        scene.compositions.append(sheet)
+
+        class _Composer:
+            comp = sheet
+
+            def refresh(self):
+                pass
+
+        win.composer = _Composer()
+        seen = []
+        monkeypatch.setattr(QMessageBox, "information",
+                            staticmethod(lambda *a, **k: seen.append(a[2])))
+        monkeypatch.setattr(QMessageBox, "warning",
+                            staticmethod(lambda *a, **k: seen.append(a[2])))
+
+        before = len(scene.saved_views)
+        win._run_sheet_command("region")
+
+        assert len(sheet.frames) == 1, "không có khung nào được đặt"
+        frame = sheet.frames[0]
+        assert str(frame.view_key).startswith("scene:"), frame.view_key
+        # The scene it names is the drawing's own rule, and it is REAL:
+        # placed on the document, so reopening the file brings it back.
+        name = str(frame.view_key[6:])
+        saved = next((v for v in scene.saved_views if v.name == name), None)
+        assert saved is not None, name
+        assert saved.drawing, "cảnh không mang quy tắc vẽ nào"
+        assert len(scene.saved_views) >= before
+        assert "Tầng 1" in seen[-1], seen[-1]
+    finally:
+        win.hide()
+
+
+def test_the_master_area_reports_the_sheet_s_own_numbers(monkeypatch):
+    """The drawing area's numbers are the SHEET's — its paper, its margin
+    and the area the drawings actually cover — not a guess and not a
+    constant: an A3 with a 10 mm margin is 400 × 277 mm of usable page."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from core.building.samples import build_sample
+    from core.building.sheets import Composicion
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        build_sample(win.viewport.history, win.viewport.scene, "townhouse")
+        scene = win.viewport.scene
+        sheet = Composicion(name="Tờ thử", paper="A3", landscape=True)
+        sheet.margin_mm = 10.0
+        scene.compositions.append(sheet)
+
+        class _Composer:
+            comp = sheet
+
+            def refresh(self):
+                pass
+
+        win.composer = _Composer()
+        seen = []
+        monkeypatch.setattr(QMessageBox, "information",
+                            staticmethod(lambda *a, **k: seen.append(a[2])))
+        monkeypatch.setattr(QMessageBox, "warning",
+                            staticmethod(lambda *a, **k: seen.append(a[2])))
+
+        win._run_sheet_command("master_area")
+        text = seen[-1].replace("\n", " | ")
+        assert "A3" in text, text
+        assert "400" in text and "277" in text, text
+        assert "0.0%" in text or "%" in text, text
+    finally:
+        win.hide()
