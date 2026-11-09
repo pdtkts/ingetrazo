@@ -779,24 +779,23 @@ def annotate_plan(scene, building, view: DrawingView, *, history=None,
                 text, layer=ANNOT_LAYER)
             add(AddTextLabelCommand(label), label, scene.text_labels)
 
+    if section_marks(building, story):
+        # Every mark of this drawing stands at the SAME height as the
+        # annotations beside it (one cut per view, read once).
+        mark_z = (story_z + _mm_or(view.row.get("cut_mm"),
+                                   DEFAULT_CUT_MM)) / 1000.0
     for symbol, p1, p2, normal in section_marks(building, story):
         # The mark is the section's own letter plus one arrow per end,
         # turned the way the viewer looks — the plan's answer to "where
         # does this section come from".
         for end in (p1, p2):
             label = TextLabel(
-                QVector3D(end[0] / 1000.0, end[1] / 1000.0,
-                          (story_z + float(view.row.get("cut_mm")
-                                           or DEFAULT_CUT_MM)) / 1000.0),
+                QVector3D(end[0] / 1000.0, end[1] / 1000.0, mark_z),
                 QVector3D(0.0, 0.0, 0.0), symbol, layer=ANNOT_LAYER)
             add(AddTextLabelCommand(label), label, scene.text_labels)
         cut = Dimension(
-            QVector3D(p1[0] / 1000.0, p1[1] / 1000.0,
-                      (story_z + float(view.row.get("cut_mm")
-                                       or DEFAULT_CUT_MM)) / 1000.0),
-            QVector3D(p2[0] / 1000.0, p2[1] / 1000.0,
-                      (story_z + float(view.row.get("cut_mm")
-                                       or DEFAULT_CUT_MM)) / 1000.0),
+            QVector3D(p1[0] / 1000.0, p1[1] / 1000.0, mark_z),
+            QVector3D(p2[0] / 1000.0, p2[1] / 1000.0, mark_z),
             QVector3D(0.0, 0.0, 0.0), text="", layer=ANNOT_LAYER)
         add(AddDimensionCommand(cut), cut, scene.dimensions)
 
