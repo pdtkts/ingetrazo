@@ -5755,6 +5755,8 @@ class MainWindow(QMainWindow):
 
         menu.addAction(tr("Chọn cùng loại trong tầng"),
                        lambda k=kinds: self._bim_select_same_kind(k))
+        if one is not None:
+            menu.addMenu(self._bim_change_kind_menu(menu, one, elements))
         menu.addAction(tr("Đổi Loại / Vật liệu…"), self._on_show_building_panel)
         menu.addAction(tr("Bảng thống kê tương tác…"), self._on_open_schedule)
 
@@ -5796,6 +5798,65 @@ class MainWindow(QMainWindow):
         if group is not None:
             scene.select([group])
         self._on_show_building_panel()
+
+    def _bim_change_kind_menu(self, parent, one, elements) -> QMenu:
+        """Đổi Loại: what this element can BECOME, and nothing else.
+
+        The list is the schema catalogue minus what the builder cannot
+        make from this one — converting a wall into a curtain wall would
+        need a host wall the wall does not have, and offering it would
+        produce a refusal instead of a result. An entry that cannot work
+        is not shown, which is why this is not the panel's type list.
+        """
+        from core.building import elements as _schemas
+        from core.building.scene_sync import TR_NAMES
+
+        current = str(one.get("type"))
+        sub = QMenu(tr("Đổi thành"), parent)
+        for kind in _schemas.BY_TYPE:
+            kind = str(kind)
+            if kind == current or kind in _schemas.OPENING_TYPES:
+                continue
+            label = tr(TR_NAMES.get(kind, kind))
+            action = sub.addAction(label)
+            action.setStatusTip(tr(
+                "Đổi cấu kiện này thành «%s»: vị trí, tên và vật liệu giữ "
+                "nguyên; thông số nào loại mới không dùng thì bỏ.") % label)
+            action.triggered.connect(
+                lambda _on=False, k=kind, ids=[str(e["id"])
+                                               for e in elements]:
+                self._bim_change_kind(ids, k))
+        if sub.isEmpty():
+            sub.setEnabled(False)
+        return sub
+
+    def _bim_change_kind(self, element_ids, kind: str) -> None:
+        """One undo step for the whole selection, or a sentence why not."""
+        from core.building import commands as _commands
+        from core.building.scene_sync import TR_NAMES, sync
+        from core.history import CommandRejected
+
+        history = self.viewport.history
+        done = 0
+        reason = ""
+        for element_id in element_ids:
+            command = _commands.change_kind(str(element_id), str(kind))
+            command._rebuild = lambda s, b: sync(s, b)
+            history.execute(command)
+            if history.last_error:
+                reason = str(history.last_error)
+                break
+            if history.last_rejected:
+                reason = str(history.last_rejected)
+                break
+            done += 1
+        label = tr(TR_NAMES.get(str(kind), str(kind)))
+        if reason:
+            self.statusBar().showMessage(reason, 6000)
+            return
+        self.viewport.notify_scene_changed()
+        self.statusBar().showMessage(
+            tr("Đã đổi %d cấu kiện thành «%s».") % (done, label), 4000)
 
     def _bim_select_same_kind(self, kinds) -> None:
         """Select every element of these kinds on the active storey."""

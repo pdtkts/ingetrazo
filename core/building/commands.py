@@ -156,6 +156,57 @@ def set_params(element_id: str, params: dict, rebuild=None) -> BuildingEdit:
     return BuildingEdit(mutate, rebuild)
 
 
+def change_kind(element_id: str, kind: str, rebuild=None) -> BuildingEdit:
+    """Change what an element IS, keeping the parameters that still apply.
+
+    «Đổi Loại» is an ordinary gesture — a slab the user drew too thick is
+    really a foundation, a wall was meant to be a glazed run — and doing it
+    by deleting and redrawing loses everything the element carried: where
+    it stands, its name, the material it is made of.
+
+    What survives is the INTERSECTION of the two schemas: a wall's
+    baseline and thickness still describe a curtain wall, so they travel;
+    a door's host and leaf type do not describe a slab and are dropped.
+    The geometry follows the new type (a curtain wall builds a grid over
+    its run), which is why this is a rebuild and not a relabelling.
+    """
+    from core.building import elements as _schemas
+    from core.history import CommandRejected
+
+    target = _schemas.defaults_for(str(kind))
+    if not target:
+        raise CommandRejected(f"không có loại cấu kiện {kind!r}")
+    hosted = str(kind) in _schemas.OPENING_TYPES
+
+    def mutate(b):
+        row = b.element(element_id)
+        if row is None:
+            return
+        was = str(row.get("type") or "")
+        source = set(_schemas.defaults_for(was))
+        # The new type's own defaults first, so a key the new schema needs
+        # is never left unset; then whatever the old element carried that
+        # the new schema also declares.
+        merged = dict(target)
+        for key, value in (row.get("params") or {}).items():
+            if key in target or key not in source:
+                merged[key] = value
+        if hosted and not merged.get("host_wall_id"):
+            # A door, a window and a curtain wall live INSIDE a wall: none
+            # of them can exist on its own, and «convert this wall into a
+            # curtain wall» would produce an element the builder refuses,
+            # which reads to the user as a broken model. The gesture the
+            # trade means is «put a glazed run in this wall», and that is
+            # the host menu.
+            raise CommandRejected(
+                f"«{kind}» phải nằm TRONG một tường chủ — dùng chuột phải "
+                f"trên tường ▸ «Trong cấu kiện này» để thêm.")
+        row["type"] = str(kind)
+        row["params"] = merged
+
+    return BuildingEdit(mutate, rebuild)
+
+
 def remove_element(element_id: str, rebuild=None) -> BuildingEdit:
     """Take one element out of the model."""
     def mutate(b):
