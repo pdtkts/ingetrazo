@@ -1499,6 +1499,56 @@ class AddPlanCurveCommand(Command):
         scene.version += 1
 
 
+class AddPlanCurvesCommand(Command):
+    """Add a SET of drawn entities at once — what one paste puts down.
+
+    One command and not a compound: the entities arrive together, they are
+    one act as far as the office is concerned, and one Ctrl+Z taking back
+    half a pasted set would be worse than not pasting at all.
+    """
+
+    def __init__(self, curves) -> None:
+        self._curves = list(curves)
+
+    def do(self, scene) -> None:
+        scene.plan_curves.extend(self._curves)
+        scene.version += 1
+
+    def undo(self, scene) -> None:
+        for curve in self._curves:
+            if curve in scene.plan_curves:
+                scene.plan_curves.remove(curve)
+            scene.selection.discard(curve)
+        scene.version += 1
+
+
+class OffsetPlanCurvesCommand(Command):
+    """Move a set of drawn entities by a delta — what a paste OFFSET does.
+
+    Recorded on the entities the command was given and not on whatever the
+    scene holds when it runs: an undo after a later edit must restore what
+    THIS command moved, and re-reading the scene would move whatever
+    happens to be there.
+    """
+
+    def __init__(self, curves, dx: float, dy: float) -> None:
+        self._curves = list(curves)
+        self._dx = float(dx)
+        self._dy = float(dy)
+
+    def _shift(self, scene, sign: float) -> None:
+        for curve in self._curves:
+            curve.points = [(x + sign * self._dx, y + sign * self._dy)
+                            for x, y in curve.points]
+        scene.version += 1
+
+    def do(self, scene) -> None:
+        self._shift(scene, 1.0)
+
+    def undo(self, scene) -> None:
+        self._shift(scene, -1.0)
+
+
 class DeletePlanCurvesCommand(Command):
     """Remove a set of drawn entities from ``scene.plan_curves``."""
 

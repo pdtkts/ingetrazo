@@ -248,3 +248,70 @@ def test_the_dxf_export_carries_the_drawn_entities(plan):
     assert net, "DXF không mang hình đã vẽ"
     # The circle arrives faceted; the 5 m line is one segment among them.
     assert len(net) > 20
+
+
+# ---- Copy 2D / Paste 2D -------------------------------------------------------
+
+def test_copy_and_paste_2d_takes_the_marked_drawing(plan, window):
+    """A drawn entity is an OBJECT: mark it, copy it, and the paste lands
+    as a copy of it — offset so it does not sit on the original, which is
+    the office's own habit and the only way the gesture is usable."""
+    scene, history = plan._scene, window.viewport.history
+    _draw(plan, "line", (0, 0), (5000, 0))
+    plan.cancel_draft()
+    original = scene.plan_curves[0]
+
+    plan.canvas.mark_curve(original, False)
+    assert plan.canvas.picked_curves() == [original]
+
+    plan._run_tool("copy2d")
+    assert len(plan._curves) == 1
+
+    before = len(scene.plan_curves)
+    plan._run_tool("paste2d")
+    assert len(scene.plan_curves) == before + 1
+
+    pasted = scene.plan_curves[-1]
+    assert pasted is not original
+    assert pasted.kind == original.kind
+    assert pasted.points != original.points, "bản dán nằm đè lên bản gốc"
+    assert pasted.story_id == original.story_id
+
+
+def test_a_paste_is_one_undo_step(plan, window):
+    """Ctrl+Z takes back the whole paste, never half of it."""
+    scene, history = plan._scene, window.viewport.history
+    _draw(plan, "line", (0, 0), (4000, 0))
+    plan.cancel_draft()
+    plan.canvas.mark_curve(scene.plan_curves[0], False)
+    plan._run_tool("copy2d")
+    plan._run_tool("paste2d")
+    assert len(scene.plan_curves) == 2
+
+    history.undo()
+    assert len(scene.plan_curves) == 1, "một Ctrl+Z chưa trả hết bản dán"
+    assert scene.plan_curves[0].points == [(0.0, 0.0), (4000.0, 0.0)]
+    history.redo()
+    assert len(scene.plan_curves) == 2
+
+
+def test_each_paste_steps_further_from_the_original(plan, window):
+    """Pasting twice must give two copies, not the same one twice — the
+    second would otherwise sit exactly on the first."""
+    scene = plan._scene
+    _draw(plan, "circle", (1000, 1000), (1000, 2000))
+    plan.canvas.mark_curve(scene.plan_curves[0], False)
+    plan._run_tool("copy2d")
+    plan._run_tool("paste2d")
+    first = list(scene.plan_curves[-1].points)
+    plan._run_tool("paste2d")
+    second = list(scene.plan_curves[-1].points)
+    assert first != second, "hai lần dán chồng lên nhau"
+
+
+def test_pasting_with_nothing_copied_says_so_and_writes_nothing(plan):
+    scene = plan._scene
+    before = len(scene.plan_curves)
+    plan._run_tool("paste2d")
+    assert len(scene.plan_curves) == before
+    assert plan.status.text(), "phải nói vì sao không dán được"

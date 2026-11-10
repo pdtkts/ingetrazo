@@ -245,6 +245,18 @@ class _Canvas(QWidget):
             if self._plan.draft_click(model[0], model[1]):
                 event.accept()
                 return
+            # The office's own ink is pickable: a dimension placed or a
+            # line drawn on the plan is an OBJECT, and copy2d has nothing
+            # to copy if a click cannot mark one.
+            curve = self._curve_at(model[0], model[1],
+                                   6.0 / self.scale_px_per_mm)
+            if curve is not None and (
+                    getattr(self, "picked", None)
+                    or event.modifiers() & Qt.ControlModifier):
+                self.mark_curve(
+                    curve, bool(event.modifiers() & Qt.ControlModifier))
+                event.accept()
+                return
             grabbed = self._plan.resolve_point(model[0], model[1])
             if grabbed.kind in ("end", "mid", "face", "grid"):
                 model = (grabbed.x_mm, grabbed.y_mm)
@@ -383,6 +395,7 @@ class _Canvas(QWidget):
         painter.fillRect(self.rect(), QColor("#FFFFFF"))
         self._paint_loops(painter)
         self._paint_segs(painter)
+        self._paint_picked_curves(painter)
         self._paint_marks(painter)
         from views.draft_tools import paint_preview
 
@@ -397,6 +410,61 @@ class _Canvas(QWidget):
         self._paint_ghost(painter)
         self._paint_handles(painter)
         painter.end()
+
+    #: The drawn entities the user has marked on the plan (ctrl-click):
+    #: what copy2d takes. They are the document's own objects, so the
+    #: selection is by identity and survives a redraw.
+    picked: list = None
+
+    def picked_curves(self) -> list:
+        """The marked drawn entities, in the order they were marked."""
+        from core.plan_draw import curves_at
+
+        return [c for c in (self.picked or ())
+                if c in curves_at(self._plan._scene,
+                                  self._plan._cut_z_mm() / 1000.0)]
+
+    def _curve_at(self, x_mm: float, y_mm: float, tol: float):
+        """The drawn entity nearest (x, y) within ``tol`` mm, or None."""
+        from core.plan_draw import curves_at
+
+        best = None
+        best_d = float(tol) * float(tol)
+        for curve in curves_at(self._plan._scene,
+                               self._plan._cut_z_mm() / 1000.0):
+            for x1, y1, x2, y2 in curve.segments():
+                # Distance from the point to the segment, not to a grid of
+                # samples: a designer clicking a long line's middle is
+                # asking for that line, and sampling would miss it.
+                dx, dy = x2 - x1, y2 - y1
+                span = dx * dx + dy * dy
+                t = 0.0 if span <= 1e-9 else max(
+                    0.0, min(1.0, ((x_mm - x1) * dx + (y_mm - y1) * dy)
+                             / span))
+                px, py = x1 + t * dx, y1 + t * dy
+                d = (x_mm - px) ** 2 + (y_mm - py) ** 2
+                if d < best_d:
+                    best_d = d
+                    best = curve
+        return best
+
+    def mark_curve(self, curve, additive: bool) -> None:
+        """Mark (or unmark) one drawn entity for the 2D clipboard."""
+        if self.picked is None:
+            self.picked = []
+        if curve is None:
+            if not additive:
+                self.picked = []
+            self.update()
+            return
+        if additive:
+            if curve in self.picked:
+                self.picked.remove(curve)
+            else:
+                self.picked.append(curve)
+        else:
+            self.picked = [curve]
+        self.update()
 
     def _paint_loops(self, painter: QPainter) -> None:
         if not self._loops:
@@ -424,6 +492,23 @@ class _Canvas(QWidget):
             painter.setPen(pens.get(kind, pens[0]))
             painter.drawLine(self.to_screen(float(entry[0]), float(entry[1])),
                              self.to_screen(float(entry[2]), float(entry[3])))
+
+    def _paint_picked_curves(self, painter: QPainter) -> None:
+        """The marked drawn entities, in a lighter ink than the model's."""
+        if not getattr(self, "picked", None):
+            return
+        from core.plan_draw import curves_at
+
+        live = set(id(c) for c in curves_at(
+            self._plan._scene, self._plan._cut_z_mm() / 1000.0))
+        painter.setPen(QPen(QColor("#2563eb"), 1.4))
+        painter.setBrush(Qt.NoBrush)
+        for curve in self.picked:
+            if id(curve) not in live:
+                continue
+            for x1, y1, x2, y2 in curve.segments():
+                painter.drawLine(self.to_screen(x1, y1),
+                                 self.to_screen(x2, y2))
 
     def _paint_marks(self, painter: QPainter) -> None:
         if not self._marks:
@@ -655,6 +740,15 @@ class PlanWindow(QDialog):
         if str(tool_key) == "magnifier":
             self.toggle_magnifier()
             return
+        if str(tool_key) == "copy2d":
+            taken = self.clipboard_curves()
+            self._say(tr("Đã sao chép %d hình vẽ 2D.") % len(taken)
+                      if taken else tr("Chưa chọn hình nào để sao chép — "
+                                       "bấm vào hình trên mặt bằng trước."))
+            return
+        if str(tool_key) == "paste2d":
+            self.paste_curves()
+            return
         cmd_id = self._cmd_for_tool(tool_key)
         if cmd_id and self.arm_draft(cmd_id):
             return
@@ -715,6 +809,13 @@ class PlanWindow(QDialog):
             return True
         if str(tool_key) in ("magnifier",):
             return True
+        if str(tool_key) == "copy2d":
+            # Nothing to copy is a real state, but the button is honest
+            # about WHY when pressed; a 2D clipboard is this window's own
+            # (see ``clipboard_curves``), so the command exists here.
+            return True
+        if str(tool_key) == "paste2d":
+            return bool(getattr(self, "_curves", None))
         from views.main_window import SHEET_COMMANDS as _SHEET_REFS
 
         sheet_commands = _SHEET_REFS
@@ -1057,6 +1158,56 @@ class PlanWindow(QDialog):
             canvas.setCursor(Qt.CrossCursor)
             canvas.update()
         return True
+
+    #: The plan's own 2D clipboard (copy2d/paste2d): which DRAWN entities
+    #: were taken and how far they have been pasted so far. Module-level
+    #: because a copy in one plan window is for pasting in the same one,
+    #: and a second window must not silently share it — see
+    #: ``_clip_owner``, which is the window the copy came from.
+    def clipboard_curves(self) -> list:
+        """Make the marked selection the 2D clipboard's own content."""
+        from core.plan_draw import PlanCurve
+
+        picked = self.canvas.picked_curves() if hasattr(
+            self.canvas, "picked_curves") else []
+        self._clip_owner = id(self.canvas)
+        self._paste_delta = 0
+        self._curves = [
+            PlanCurve(c.kind, list(c.points), z=c.z, story_id=c.story_id,
+                      layer=c.layer) for c in picked]
+        return list(self._curves)
+
+    def paste_curves(self) -> int:
+        """Put the 2D clipboard down, offset so it does not land on its
+        original — each paste steps further, the office's own habit."""
+        from core.history import (AddPlanCurvesCommand, CompoundCommand,
+                                  OffsetPlanCurvesCommand)
+
+        from views.draft_tools import _z_cut
+
+        source = list(getattr(self, "_curves", None) or ())
+        if id(self.canvas) != getattr(self, "_clip_owner", None) or not source:
+            self._say(tr("Chưa sao chép gì để dán."))
+            return 0
+        step = float(200.0) * (int(getattr(self, "_paste_delta", 0)) + 1)
+        z = _z_cut(self)
+        made = []
+        for curve in source:
+            copy = type(curve)(curve.kind, list(curve.points), z=z,
+                               story_id=str(self._story_id or ""),
+                               layer=curve.layer)
+            made.append(copy)
+        # ONE undo step: putting the copies down and shifting them off the
+        # original is a single act, and Ctrl+Z taking back only the shift
+        # would leave them stacked on top of their source — a paste that
+        # half-undid is worse than one that did nothing.
+        self._write(CompoundCommand([
+            AddPlanCurvesCommand(made),
+            OffsetPlanCurvesCommand(made, step, -step)]))
+        self._paste_delta = int(getattr(self, "_paste_delta", 0)) + 1
+        self.refresh()
+        self._say(tr("Đã dán %d hình, lệch %.0f mm.") % (len(made), step))
+        return len(made)
 
     def finish_draft(self) -> bool:
         """End a multi-click run (Enter, a right-click) COMMITTING it.
