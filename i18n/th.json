@@ -3366,5 +3366,9 @@
   "Click the fixture's centre.": "คลิกที่ศูนย์กลางสุขภัณฑ์",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "ลากเป็นสี่เหลี่ยม หรือ Ctrl = เลือกตามขอบห้อง",
   "Drag the rectangle, or click the room's inside.": "ลากสี่เหลี่ยม หรือคลิกภายในห้อง",
-  "Click inside the room: its boundary and area are found.": "คลิกภายในห้อง ขอบและพื้นที่จะถูกตรวจหาให้"
+  "Click inside the room: its boundary and area are found.": "คลิกภายในห้อง ขอบและพื้นที่จะถูกตรวจหาให้",
+  "Click a building element to take its parameters.": "คลิกองค์ประกอบอาคารเพื่อดึงพารามิเตอร์ของมัน",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "คลิกองค์ประกอบที่จะนำไปใช้ หรือคลิกที่ว่างเพื่อใช้กับสิ่งที่เลือกทั้งหมด",
+  "Click the start of the stair's centre line.": "คลิกจุดเริ่มต้นของเส้นกึ่งกลางบันได",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "คลิกจุดสิ้นสุด ลูกนอนจะถูกแบ่งระหว่างสองจุด และจำนวนลูกตั้งจะแสดงขณะวาด"
 }

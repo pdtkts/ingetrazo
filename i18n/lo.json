@@ -3366,5 +3366,9 @@
   "Click the fixture's centre.": "ຄລິກໃຈກາງອຸປະກອນອະນາໄມ.",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "ລາກເປັນສີ່ຫຼ່ຽມ, ຫຼື Ctrl = ເລືອກຕາມຂອບຫ້ອງ.",
   "Drag the rectangle, or click the room's inside.": "ລາກສີ່ຫຼ່ຽມ, ຫຼືຄລິກພາຍໃນຫ້ອງ.",
-  "Click inside the room: its boundary and area are found.": "ຄລິກພາຍໃນຫ້ອງ: ຂອບແລະເນື້ອທີ່ຈະຖືກກວດພົບ."
+  "Click inside the room: its boundary and area are found.": "ຄລິກພາຍໃນຫ້ອງ: ຂອບແລະເນື້ອທີ່ຈະຖືກກວດພົບ.",
+  "Click a building element to take its parameters.": "ຄລິກອົງປະກອບອາຄານເພື່ອເອົາຕົວກຳນົດຂອງມັນ.",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "ຄລິກອົງປະກອບທີ່ຈະນຳໄປໃຊ້, ຫຼື ຄລິກອອກນອກເພື່ອໃຊ້ກັບທັງໝົດທີ່ເລືອກ.",
+  "Click the start of the stair's centre line.": "ຄລິກຈຸດເລີ່ມຂອງເສັ້ນໃຈກາງຂອງຂັ້ນໄດ.",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "ຄລິກຈຸດສຸດທ້າຍ; ຂັ້ນພັກຈະຖືກແບ່ງລະຫວ່າງສອງຈຸດ ແລະ ຈຳນວນຂັ້ນຕັ້ງຈະຖືກລາຍງານຂະນະວາດ."
 }

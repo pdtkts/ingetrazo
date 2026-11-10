@@ -3364,5 +3364,9 @@
   "Click the fixture's centre.": "點擊衛浴設備中心。",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "拖出矩形，或 Ctrl = 取房間輪廓。",
   "Drag the rectangle, or click the room's inside.": "拖出矩形，或點擊房間內部。",
-  "Click inside the room: its boundary and area are found.": "點擊房間內部：自動辨識輪廓與面積。"
+  "Click inside the room: its boundary and area are found.": "點擊房間內部：自動辨識輪廓與面積。",
+  "Click a building element to take its parameters.": "點擊建築構件以取得其參數。",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "點擊要套用的構件，或在空白處點擊以套用至整個選取集。",
+  "Click the start of the stair's centre line.": "點擊樓梯中心線的起點。",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "點擊終點；踏步會在兩點之間排布，繪製過程中會顯示踢面數量。"
 }

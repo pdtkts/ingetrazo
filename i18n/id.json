@@ -3366,5 +3366,9 @@
   "Click the fixture's centre.": "Klik pusat alat saniter.",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "Tarik persegi, atau Ctrl = ambil batas ruangan.",
   "Drag the rectangle, or click the room's inside.": "Tarik perseginya, atau klik di dalam ruangan.",
-  "Click inside the room: its boundary and area are found.": "Klik di dalam ruangan: batas dan luasnya terdeteksi."
+  "Click inside the room: its boundary and area are found.": "Klik di dalam ruangan: batas dan luasnya terdeteksi.",
+  "Click a building element to take its parameters.": "Klik elemen bangunan untuk mengambil parameternya.",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "Klik elemen tujuan penerapannya, atau klik di luar untuk menerapkannya ke seluruh pilihan.",
+  "Click the start of the stair's centre line.": "Klik awal garis tengah tangga.",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "Klik ujungnya; anak tangga dibagi di antara kedua titik dan jumlah tanjakan dilaporkan saat Anda menggambar."
 }

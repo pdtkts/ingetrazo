@@ -3398,5 +3398,9 @@
   "Click the fixture's centre.": "انقر مركز القطعة الصحية.",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "اسحب مستطيلاً، أو Ctrl = التقاط حدود الغرفة.",
   "Drag the rectangle, or click the room's inside.": "اسحب المستطيل، أو انقر داخل الغرفة.",
-  "Click inside the room: its boundary and area are found.": "انقر داخل الغرفة: تُكتشف الحدود والمساحة."
+  "Click inside the room: its boundary and area are found.": "انقر داخل الغرفة: تُكتشف الحدود والمساحة.",
+  "Click a building element to take its parameters.": "انقر على عنصر إنشائي لأخذ معاملاته.",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "انقر على العنصر المطلوب تطبيقها عليه، أو انقر بعيدًا لتطبيقها على التحديد كله.",
+  "Click the start of the stair's centre line.": "انقر بداية الخط المحوري للدرج.",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "انقر النهاية؛ تُوزَّع الدرجات بين النقطتين ويُعرض عدد القوائم أثناء الرسم."
 }

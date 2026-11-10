@@ -3363,5 +3363,9 @@
   "Click the fixture's centre.": "衛生器具の中心をクリック。",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "矩形をドラッグ、または Ctrl = 部屋の境界を取得。",
   "Drag the rectangle, or click the room's inside.": "矩形をドラッグ、または部屋の内側をクリック。",
-  "Click inside the room: its boundary and area are found.": "部屋の内側をクリック。境界と面積が検出されます。"
+  "Click inside the room: its boundary and area are found.": "部屋の内側をクリック。境界と面積が検出されます。",
+  "Click a building element to take its parameters.": "建築要素をクリックするとそのパラメータを取得します。",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "適用先の要素をクリックするか、何もない所をクリックすると選択全体に適用します。",
+  "Click the start of the stair's centre line.": "階段の通り芯の始点をクリック。",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "終点をクリック。踏面は二点の間に割り付けられ、蹴上げの数が作図中に表示されます。"
 }

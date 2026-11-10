@@ -3371,5 +3371,9 @@
   "Click the fixture's centre.": "Kliknij środek ceramiki sanitarnej.",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "Narysuj prostokąt albo Ctrl = weź obrys pomieszczenia.",
   "Drag the rectangle, or click the room's inside.": "Narysuj prostokąt albo kliknij wewnątrz pomieszczenia.",
-  "Click inside the room: its boundary and area are found.": "Kliknij wewnątrz pomieszczenia: obrys i pole są wykrywane."
+  "Click inside the room: its boundary and area are found.": "Kliknij wewnątrz pomieszczenia: obrys i pole są wykrywane.",
+  "Click a building element to take its parameters.": "Kliknij element budowlany, aby przejąć jego parametry.",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "Kliknij element, do którego je zastosować, albo kliknij obok, aby zastosować je do całego wyboru.",
+  "Click the start of the stair's centre line.": "Kliknij początek linii środkowej schodów.",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "Kliknij koniec; stopnie zostaną rozłożone między tymi punktami, a liczba podstopnic jest podawana w trakcie rysowania."
 }

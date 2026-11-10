@@ -3363,5 +3363,9 @@
   "Click the fixture's centre.": "Щёлкните центр сантехприбора.",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "Протяните прямоугольник или Ctrl = взять контур помещения.",
   "Drag the rectangle, or click the room's inside.": "Протяните прямоугольник или щёлкните внутри помещения.",
-  "Click inside the room: its boundary and area are found.": "Щёлкните внутри помещения: контур и площадь определяются."
+  "Click inside the room: its boundary and area are found.": "Щёлкните внутри помещения: контур и площадь определяются.",
+  "Click a building element to take its parameters.": "Щёлкните строительный элемент, чтобы взять его параметры.",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "Щёлкните элемент, к которому их применить, или щёлкните в стороне, чтобы применить их ко всему выделению.",
+  "Click the start of the stair's centre line.": "Щёлкните начало осевой линии лестницы.",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "Щёлкните конец; проступи разложатся между двумя точками, а число подступенков показывается во время построения."
 }

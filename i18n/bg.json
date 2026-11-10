@@ -3364,5 +3364,9 @@
   "Click the fixture's centre.": "Кликнете центъра на санитарния прибор.",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "Начертайте правоъгълник или Ctrl = вземи контура на помещението.",
   "Drag the rectangle, or click the room's inside.": "Начертайте правоъгълника или кликнете вътре в помещението.",
-  "Click inside the room: its boundary and area are found.": "Кликнете вътре в помещението: контурът и площта се откриват."
+  "Click inside the room: its boundary and area are found.": "Кликнете вътре в помещението: контурът и площта се откриват.",
+  "Click a building element to take its parameters.": "Кликнете върху строителен елемент, за да вземете параметрите му.",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "Кликнете върху елемента, към който да ги приложите, или встрани, за да ги приложите към целия избор.",
+  "Click the start of the stair's centre line.": "Кликнете началото на осовата линия на стълбището.",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "Кликнете края; стъпалата се разпределят между двете точки, а броят на подстъпалата се отчита, докато чертаете."
 }

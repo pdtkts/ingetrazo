@@ -3363,5 +3363,9 @@
   "Click the fixture's centre.": "Haz clic en el centro del aparato sanitario.",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "Arrastra un rectángulo, o Ctrl = tomar el contorno de la habitación.",
   "Drag the rectangle, or click the room's inside.": "Arrastra el rectángulo, o haz clic dentro de la habitación.",
-  "Click inside the room: its boundary and area are found.": "Haz clic dentro de la habitación: su contorno y su área se detectan."
+  "Click inside the room: its boundary and area are found.": "Haz clic dentro de la habitación: su contorno y su área se detectan.",
+  "Click a building element to take its parameters.": "Haz clic en un elemento de construcción para tomar sus parámetros.",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "Haz clic en el elemento al que aplicarlos, o haz clic fuera para aplicarlos a toda la selección.",
+  "Click the start of the stair's centre line.": "Haz clic en el inicio de la línea central de la escalera.",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "Haz clic en el final; las huellas se resuelven entre ambos puntos y el número de contrahuellas se informa mientras dibujas."
 }

@@ -3364,5 +3364,9 @@
   "Click the fixture's centre.": "点击洁具中心。",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "拖出矩形，或 Ctrl = 取房间轮廓。",
   "Drag the rectangle, or click the room's inside.": "拖出矩形，或点击房间内部。",
-  "Click inside the room: its boundary and area are found.": "点击房间内部：自动识别轮廓与面积。"
+  "Click inside the room: its boundary and area are found.": "点击房间内部：自动识别轮廓与面积。",
+  "Click a building element to take its parameters.": "点击建筑构件以获取其参数。",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "点击要应用到的构件，或在空白处点击以应用到整个选择集。",
+  "Click the start of the stair's centre line.": "点击楼梯中心线的起点。",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "点击终点；踏步将在两点之间排布，绘制过程中会显示踢面数量。"
 }

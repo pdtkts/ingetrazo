@@ -3370,5 +3370,9 @@
   "Click the fixture's centre.": "Клацніть центр сантехприладу.",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "Простягніть прямокутник або Ctrl = взяти контур приміщення.",
   "Drag the rectangle, or click the room's inside.": "Простягніть прямокутник або клацніть усередині приміщення.",
-  "Click inside the room: its boundary and area are found.": "Клацніть усередині приміщення: контур і площа визначаються."
+  "Click inside the room: its boundary and area are found.": "Клацніть усередині приміщення: контур і площа визначаються.",
+  "Click a building element to take its parameters.": "Клацніть будівельний елемент, щоб узяти його параметри.",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "Клацніть елемент, до якого їх застосувати, або клацніть осторонь, щоб застосувати їх до всього виділення.",
+  "Click the start of the stair's centre line.": "Клацніть початок осьової лінії сходів.",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "Клацніть кінець; проступи розкладуться між двома точками, а кількість підсхідців показується під час креслення."
 }

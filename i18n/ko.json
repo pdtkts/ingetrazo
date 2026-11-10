@@ -3363,5 +3363,9 @@
   "Click the fixture's centre.": "위생기구의 중심을 클릭하세요.",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "직사각형을 드래그하거나 Ctrl = 방 경계 선택.",
   "Drag the rectangle, or click the room's inside.": "직사각형을 드래그하거나 방 안쪽을 클릭하세요.",
-  "Click inside the room: its boundary and area are found.": "방 안쪽을 클릭하세요. 경계와 면적이 감지됩니다."
+  "Click inside the room: its boundary and area are found.": "방 안쪽을 클릭하세요. 경계와 면적이 감지됩니다.",
+  "Click a building element to take its parameters.": "건축 요소를 클릭하면 그 매개변수를 가져옵니다.",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "적용할 요소를 클릭하거나, 빈 곳을 클릭하면 선택 전체에 적용됩니다.",
+  "Click the start of the stair's centre line.": "계단 중심선의 시작점을 클릭하세요.",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "끝점을 클릭하세요. 디딤판은 두 점 사이에 배분되고, 그리는 동안 챌판 개수가 표시됩니다."
 }

@@ -3581,5 +3581,9 @@
   "Click the fixture's centre.": "Bấm tâm thiết bị vệ sinh.",
   "Drag a rectangle, or Ctrl = pick the room's boundary.": "Kéo một hình chữ nhật, hoặc Ctrl = chọn theo biên phòng.",
   "Drag the rectangle, or click the room's inside.": "Kéo hình chữ nhật, hoặc bấm vào bên trong phòng.",
-  "Click inside the room: its boundary and area are found.": "Bấm vào trong phòng: biên và diện tích được nhận tự động."
+  "Click inside the room: its boundary and area are found.": "Bấm vào trong phòng: biên và diện tích được nhận tự động.",
+  "Click a building element to take its parameters.": "Bấm vào cấu kiện để lấy thông số của nó.",
+  "Click the element to apply them to, or click away to apply them to the whole selection.": "Bấm vào cấu kiện cần áp thông số, hoặc bấm ra ngoài để áp cho cả nhóm đang chọn.",
+  "Click the start of the stair's centre line.": "Bấm điểm đầu đường tim thang.",
+  "Click the end; the treads are solved between the two, and the riser count is reported while you draw.": "Bấm điểm cuối; mặt bậc được chia giữa hai điểm và số bậc nâng được báo ngay khi vẽ."
 }
