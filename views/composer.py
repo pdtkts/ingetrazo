@@ -734,6 +734,8 @@ def _paint_cut_hatches_mm(painter: QPainter, frame: MarcoVista, fills,
     is hatched with the frame's own single pattern exactly as before —
     an unattributed area is still a cut area, and leaving it white would
     lose the poché rather than lose a detail of it."""
+    from PySide6.QtGui import QPainterPath
+
     from core.building.patterns import families_for
 
     color = QColor(getattr(frame, "cut_fill_color", "") or "#595e69")

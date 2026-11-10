@@ -174,3 +174,47 @@ def test_the_paper_frame_carries_each_area_s_own_material():
     assert len(materials) == len(fills), (len(materials), len(fills))
     assert len(set(materials)) >= 2, sorted(set(materials))
     assert CONCRETE in set(materials), set(materials)
+
+
+def test_the_paper_hatches_each_ring_in_its_own_pattern():
+    """The frame's paint is where the hatching happens, and it is the one
+    place a missing import is invisible to every test that only checks the
+    materials: `QPainterPath` was used there without being imported, so
+    every frame with a hatched cut raised NameError as it PAINTED — a
+    drawing that renders blank on the sheet an office sends out.
+
+    So this paints: two rings, two materials, and the ink they leave on
+    the image must differ, because masonry is one 45° family and concrete
+    interleaves two with a lateral shift.
+    """
+    import numpy as np
+    from PySide6.QtGui import QImage, QPainter
+
+    from core.composition import MarcoVista
+    from views.composer import _paint_cut_fills_mm
+
+    frame = MarcoVista()
+    frame.cut_fill = "hatch"
+    frame.cut_materials = [MASONRY, CONCRETE]
+    masonry_ring = np.array([[10.0, 10.0], [110.0, 10.0],
+                             [110.0, 60.0], [10.0, 60.0]])
+    concrete_ring = np.array([[150.0, 10.0], [250.0, 10.0],
+                              [250.0, 60.0], [150.0, 60.0]])
+
+    image = QImage(300, 90, QImage.Format_ARGB32)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    try:                       # this raised NameError before the fix
+        _paint_cut_fills_mm(painter, frame, [masonry_ring, concrete_ring])
+    finally:
+        painter.end()
+
+    def ink(x0, x1):
+        return sum(1 for y in range(10, 60) for x in range(x0, x1)
+                   if image.pixel(x, y) != 0xFFFFFFFF)
+
+    masonry_ink, concrete_ink = ink(10, 110), ink(150, 250)
+    assert masonry_ink > 0, "vùng gạch không được tô gì"
+    assert concrete_ink > 0, "vùng bê tông không được tô gì"
+    assert masonry_ink != concrete_ink, \
+        "hai vật liệu tô ra cùng một vệt — mất hẳn ý nghĩa của poché"
