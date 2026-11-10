@@ -398,3 +398,60 @@ def test_the_magnifier_shows_the_same_drawing_under_a_lens():
     assert not plan._lens.isVisible(), "bấm lần hai phải tắt kính lúp"
     plan.hide()
     win.hide()
+
+
+def test_every_command_the_bar_offers_can_actually_be_invoked(window):
+    """L33: a button that shows ENABLED must run when pressed.
+
+    The bar already proves that a disabled one says why (the test above).
+    This is the other half, and the one that catches a command wired into
+    the availability table but not into the dispatch: every enabled
+    command is invoked through exactly the path a click takes, and each
+    must either arm a tool, move the plan, or say something on the status
+    line — a silent no-op is a command that lied about existing.
+    """
+    from core.building import registry
+    from views import draft_tools
+    from views.plan_window import open_plan_window
+
+    _b, _s, _h = _house(window, storeys=1)
+    plan = open_plan_window(window)
+    plan.refresh()
+
+    declared = [cmd for _group, ids in registry.PLAN_BAR for cmd in ids]
+    live = [cmd for cmd in declared if plan._tool_available(cmd)]
+    assert len(live) >= 39, f"chỉ {len(live)} lệnh chạy được"
+
+    # A command that puts the plan into a MODE (an armed tool) is checked
+    # by its own name; the rest must leave a trace on the status line.
+    armed_expected = set(draft_tools.DRAFT_TOOLS)
+    silent = []
+    for cmd in live:
+        plan.cancel_draft()
+        plan.status.clear()
+        plan.canvas.mark_curve(None, False)
+        tool_key = cmd
+        try:
+            plan._run_tool(tool_key)
+        except Exception as exc:                     # noqa: BLE001 — the
+            silent.append(f"{cmd}: {type(exc).__name__}: {exc}")  # failure
+            continue
+        if str(tool_key) in armed_expected:
+            # A plan-side drafting tool arms INSIDE the plan window.
+            if plan._draft is None:
+                silent.append(f"{cmd}: không bật được công cụ")
+            continue
+        # Anything else is the application's own tool, and activating it is
+        # what a press does: the viewport must now be holding it (or the
+        # status line must say why it cannot — which is a real answer, not
+        # a silent no-op).
+        if str(tool_key) == "magnifier":
+            continue                       # the lens opens its own window
+        active = getattr(plan._window.viewport, "active_tool", None)
+        # The tool table is the identity: a bar key and a tool-object key
+        # differ where the bar inherited a name from the 3D toolbar.
+        wanted = plan._window._tools.get(str(tool_key))
+        if active is not wanted and not plan.status.text():
+            silent.append(f"{cmd}: bấm mà không bật được gì")
+        plan.cancel_draft()
+    assert not silent, "lệnh bật mà bấm vào không chạy: " + "; ".join(silent)
