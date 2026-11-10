@@ -22,6 +22,7 @@ import os as _os
 import time as _time_mod
 from abc import ABC, abstractmethod
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path as _Path
 from typing import Iterable, Optional
 
@@ -3166,6 +3167,76 @@ class ScaleGroupCommand(Command):
             self.group.mesh.restore_state(self._before)
             self.group.axes = self._axes_before
             scene.version += 1
+
+
+@dataclass
+class _EdgeSoftness:
+    """One edge's soft flag as it was before a softening pass — kept so
+    undo puts back EXACTLY what was there, including the difference
+    between «soft on purpose» (a fillet seam) and «soft because the angle
+    was shallow»."""
+    edge: object
+    soft: bool
+
+
+class SoftenEdgesCommand(Command):
+    """Soften (or sharpen) edges by the ANGLE between their two faces.
+
+    Every renderer answers this question already, one way: a shallow
+    dihedral reads as one smooth surface and its edge should not be drawn,
+    while a real corner should. The angle is the user's own — 30° for a
+    model that wants lots of creases shown, 60° for one that wants almost
+    every seam quietly merged — so it is stated once, per action, and every
+    edge the pass changes is restored exactly by undo.
+    """
+
+    keeps_paint = True
+    keeps_groups = True
+
+    def __init__(self, deg: float = 42.0, *, per_group: bool = False) -> None:
+        self.deg = float(deg)
+        self.per_group = bool(per_group)
+        self._before: list = []
+        self._after: list = []
+
+    def _targets(self, scene):
+        for group in getattr(scene, "groups", None) or ():
+            mesh = getattr(group, "mesh", None)
+            if mesh is None:
+                continue
+            yield mesh
+
+    def do(self, scene) -> None:
+        import math
+
+        cos_t = math.cos(math.radians(self.deg))
+        self._before = []
+        self._after = []
+        for mesh in self._targets(scene):
+            for edge in mesh.edges:
+                faces = getattr(edge, "faces", None) or ()
+                if len(faces) != 2:
+                    continue
+                was = bool(getattr(edge, "soft", False))
+                na, nb = faces[0].normal(), faces[1].normal()
+                dot = na.x() * nb.x() + na.y() * nb.y() + na.z() * nb.z()
+                now = dot > cos_t
+                if was == now:
+                    continue
+                self._before.append(_EdgeSoftness(edge, was))
+                edge.soft = now
+                self._after.append(now)
+        if self._before:
+            scene.version += 1
+        if hasattr(scene, "_bounds_cache"):
+            scene._bounds_cache = None
+
+    def undo(self, scene) -> None:
+        for row in self._before:
+            row.edge.soft = row.soft
+        scene.version += 1
+        if hasattr(scene, "_bounds_cache"):
+            scene._bounds_cache = None
 
 
 class PruneOrphanEdgesCommand(Command):

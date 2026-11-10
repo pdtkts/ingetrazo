@@ -3248,6 +3248,15 @@ class MainWindow(QMainWindow):
         verify_action.triggered.connect(self._on_verify_dxf)
         advanced.addAction(verify_action)
 
+        soften_action = QAction(tr("Góc làm mềm cạnh…"), advanced)
+        soften_action.setStatusTip(tr(
+            "Gộp các mặt phẳng gần như tiếp tuyến thành MỘT mặt êm: cạnh "
+            "giữa hai mặt nghiêng ít hơn góc này không còn được vẽ, nên "
+            "một mặt cong ra một mặt cong chứ không thành các dải. Góc "
+            "lớn (60°) làm êm nhiều, góc nhỏ (30°) giữ nhiều cạnh."))
+        soften_action.triggered.connect(self._on_soften_edges)
+        advanced.addAction(soften_action)
+
         lag_action = QAction(tr("Đo lag…"), advanced)
         lag_action.setStatusTip(tr(
             "Đo thời gian dựng lại hình của mô hình đang mở: số cấu kiện, "
@@ -3418,6 +3427,34 @@ class MainWindow(QMainWindow):
         model was never allowed to drift from the picture.
         """
         return bool(getattr(self, "_bim_hold", False))
+
+    def _on_soften_edges(self) -> None:
+        """Góc làm mềm: one angle, applied to the whole model, one undo."""
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+        from core.history import SoftenEdgesCommand
+
+        scene = self.viewport.scene
+        deg, ok = QInputDialog.getDouble(
+            self, tr("Góc làm mềm cạnh"),
+            tr("Cạnh giữa hai mặt nghiêng ít hơn góc này thì không vẽ\n"
+               "(độ) — 30 giữ nhiều cạnh, 60 làm êm nhiều:"),
+            42.0, 0.0, 179.0, 1)
+        if not ok:
+            return
+        history = getattr(self.viewport, "history", None)
+        command = SoftenEdgesCommand(float(deg))
+        if history is not None:
+            history.execute(command)
+        else:
+            command.do(scene)
+        changed = len(command._before)
+        self.viewport.update()
+        QMessageBox.information(
+            self, tr("Góc làm mềm cạnh"),
+            tr("Đã đổi %d cạnh ở góc %.0f° — một Ctrl+Z trả lại như cũ.")
+            % (changed, float(deg)) if changed
+            else tr("Không có cạnh nào đổi ở góc %.0f°.") % float(deg))
 
     def _on_toggle_pause_bim(self, paused: bool) -> None:
         """Hold BIM geometry regeneration, or release it and catch up."""

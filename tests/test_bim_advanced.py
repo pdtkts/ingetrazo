@@ -240,3 +240,45 @@ def test_the_toolbar_list_is_built_when_it_opens(window):
     extra.setVisible(False)
     window._show_all_toolbars()
     assert not extra.isHidden()
+
+
+def test_the_softening_angle_smooths_and_sharpens_by_the_dihedral(window):
+    """«Góc làm mềm cạnh»: a shallow dihedral reads as ONE surface and its
+    edge is not drawn, a real corner is. The angle is the user's own, and
+    undo puts every edge back exactly — including the difference between
+    «soft on purpose» and «soft because the angle was shallow»."""
+    from core.history import SoftenEdgesCommand
+
+    scene, history = window.viewport.scene, window.viewport.history
+    from core.building import samples as _samples
+
+    _samples.build_sample(history, scene, "townhouse")
+    group = next(g for g in scene.groups
+                 if getattr(g, "mesh", None) and len(g.mesh.faces) > 3)
+    edges = [e for e in group.mesh.edges
+             if len(getattr(e, "faces", ()) or ()) == 2]
+    assert edges, "mô hình mẫu không có cạnh nào giữa hai mặt"
+    before = [bool(e.soft) for e in edges]
+
+    # 179°: essentially every two-faced edge is within the angle.
+    wide = SoftenEdgesCommand(179.0)
+    history.execute(wide)
+    assert wide._before, "không cạnh nào đổi ở góc 179°"
+    assert all(e.soft for e in edges)
+
+    history.undo()
+    assert [bool(e.soft) for e in edges] == before, \
+        "Ctrl+Z không trả lại đúng trạng thái cạnh"
+
+    # 0°: nothing is shallower than zero, so every edge becomes a crease.
+    sharp = SoftenEdgesCommand(0.0)
+    history.execute(sharp)
+    assert not any(e.soft for e in edges)
+    history.undo()
+    assert [bool(e.soft) for e in edges] == before
+
+    # …and a redo/undo cycle is stable, so the command is not one-way.
+    history.redo()
+    assert not any(e.soft for e in edges)
+    history.undo()
+    assert [bool(e.soft) for e in edges] == before
