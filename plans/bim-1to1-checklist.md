@@ -85,7 +85,7 @@
 ## 8. Render / chiếu 2D (render)
 - [x] Quy tắc 1 bản vẽ (`DrawingView`): nguồn hình (tầng/mặt đứng/mặt cắt/chi tiết), tỷ lệ (scale_denom + auto_scale), khổ (page của tờ), lọc (hidden_layers + crop + clip_planes). **Vùng hiển thị vẽ được trên Plan** (`views/draft_tools.py::CropTool`): kéo một chữ nhật → ghi thành DÒNG trong `building.settings['drawings']` → bộ tờ PHÁT HÀNH nó thành khung trên tờ chi tiết 1:25, và vì là quy tắc nên vẫn khớp mô hình sau khi sửa. `T: tests/test_plan_draft_tools.py` (12)
 - [ ] Chiếu // ra giấy (projection), cắt (clipper), chụp bản vẽ (capture/scene/scene_pack)
-- [ ] GeoCache giữ hình theo definition; Vật liệu Flat (bảng + tô liền khối + ẩn cạnh + góc làm mềm)
+- [~] GeoCache giữ hình theo definition: ✗ chưa có (cache hình theo định nghĩa cấu kiện) — **Vật liệu Flat ĐÃ CÓ phần chính**: bảng vật liệu (`core/building/elements.py::MATERIALS`, 15 vật liệu VN) + tô liền khối (style `Monochrome`/`Hidden line` = mặt phẳng một màu, không vân) + ẩn cạnh (`Style.edges=False`, lưu được thành style riêng) + **góc làm mềm cạnh** (`core/history.py::SoftenEdgesCommand` + BIM ▸ Nâng cao ▸ «Góc làm mềm cạnh…»: cạnh giữa hai mặt nghiêng ít hơn góc người dùng đặt thì không vẽ — 179° làm êm hết, 0° giữ hết cạnh; undo trả ĐÚNG trạng thái từng cạnh nên phân biệt được cạnh mềm do góc với cạnh mềm cố ý). `T: tests/test_bim_advanced.py::test_the_softening_angle_smooths_and_sharpens_by_the_dihedral`
 - [x] `S:` nét cắt/poché/khuất qua HLR + section sẵn có: mặt phẳng xén không vẽ vệt cắt (`clip_only`), hatch ra DXF — `T: tests/test_building_cad_out.py`, `tests/test_hlr_*` xanh
 
 ## 9. Navigator & Workspace
