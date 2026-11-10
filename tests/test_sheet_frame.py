@@ -180,6 +180,61 @@ def test_a_region_places_a_rule_backed_drawing_on_the_sheet(monkeypatch):
         win.hide()
 
 
+def test_the_plan_bar_s_sheet_buttons_wake_up_when_a_sheet_opens(monkeypatch):
+    """The bar is built once, and a command of the SHEET can only run once
+    the composer is showing one — so the buttons must be re-decided as the
+    session changes. A button that stayed grey said «chưa có trong bản
+    dựng» about a tool that exists; a button enabled later but never WIRED
+    (because it was disabled at build time) would look live and do
+    nothing, which is worse."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from core.building.samples import build_sample
+    from core.building.sheets import Composicion
+    from views.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        build_sample(win.viewport.history, win.viewport.scene, "townhouse")
+        scene = win.viewport.scene
+        win._on_open_plan_window()
+        plan = win._plan_window
+
+        for cmd in ("region", "sheet_frame", "master_area"):
+            button = plan.bar_buttons[cmd]
+            assert not button.isEnabled()
+            # …and the reason is the TRUE one, not «not in this build».
+            assert "chưa có trong bản dựng" not in button.toolTip(), \
+                button.toolTip()
+
+        sheet = Composicion(name="Tờ thử", paper="A3")
+        scene.compositions.append(sheet)
+
+        class _Composer:
+            comp = sheet
+
+            def refresh(self):
+                pass
+
+        win.composer = _Composer()
+        plan.refresh()
+
+        seen = []
+        monkeypatch.setattr(QMessageBox, "information",
+                            staticmethod(lambda *a, **k: seen.append(a[2])))
+        monkeypatch.setattr(QMessageBox, "warning",
+                            staticmethod(lambda *a, **k: seen.append(a[2])))
+        for cmd in ("region", "sheet_frame", "master_area"):
+            assert plan.bar_buttons[cmd].isEnabled(), cmd
+            plan.bar_buttons[cmd].click()
+        # The bar and the menu made ONE command each, not two that drift:
+        # the region really placed a drawing, the frame really arrived.
+        assert sheet.frames, "Vùng vẽ không đặt được bản vẽ nào"
+        assert len(seen) == 3, seen
+    finally:
+        win.hide()
+
+
 def test_the_master_area_reports_the_sheet_s_own_numbers(monkeypatch):
     """The drawing area's numbers are the SHEET's — its paper, its margin
     and the area the drawings actually cover — not a guess and not a

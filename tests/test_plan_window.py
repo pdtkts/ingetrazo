@@ -147,7 +147,18 @@ def test_every_plan_command_has_a_button_and_the_missing_ones_say_so(window):
             assert "chưa có" not in button.toolTip()
         else:
             assert not button.isEnabled()
-            assert "chưa có" in button.toolTip(), cmd
+            # A disabled button ALWAYS says why, and says something TRUE.
+            # Most say the build lacks the tool; the commands of a SHEET
+            # say they need a sheet in front of the composer, which is a
+            # different and more useful sentence — asserting «chưa có» on
+            # those would pin a lie in place.
+            from views.main_window import SHEET_COMMANDS
+
+            assert button.toolTip(), cmd
+            if cmd in SHEET_COMMANDS:
+                assert "Bố cục" in button.toolTip(), cmd
+            else:
+                assert "chưa có" in button.toolTip(), cmd
     # The status quo, stated so a change is deliberate: most of the bar
     # works, and what does not is disabled rather than faked.
     assert len(enabled) >= 25

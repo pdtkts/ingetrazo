@@ -87,6 +87,12 @@ COMMAND_TOOLS = {
     "door": "door", "window": "window", "zone": "zone",
     "fixture": "fixture", "section": "section",
     "pushpull": "pushpull", "paint": "paint",
+    # Commands of the SHEET (see views.main_window.SHEET_COMMANDS): the
+    # plan window only decides whether they can run — they run against the
+    # sheet in front of the composer. They are declared here so the button
+    # reaches that check instead of falling into «no such tool».
+    "region": "region", "sheet_frame": "sheet_frame",
+    "master_area": "master_area",
 }
 
 
@@ -690,6 +696,8 @@ class PlanWindow(QDialog):
         col.setContentsMargins(2, 2, 4, 2)
         col.setSpacing(3)
         self.bar_buttons: dict = {}
+        self._bar_labels: dict = {}
+        self._bar_wired: set = set()
         for group, ids in registry.PLAN_BAR:
             for cmd_id in ids:
                 found = registry.find(cmd_id)
@@ -700,16 +708,35 @@ class PlanWindow(QDialog):
                 button.setMinimumWidth(74)
                 key = key_for_command(cmd_id)
                 tool = self._tool_for(cmd_id)
-                if tool is None or not self._tool_available(tool):
+                if tool is None:
                     button.setEnabled(False)
                     button.setToolTip(
                         tr("%s — công cụ này chưa có trong bản dựng.") % label)
+                elif not self._tool_available(tool):
+                    # The command EXISTS and is the SHEET's — a composer
+                    # showing a sheet is what it runs against. Saying «chưa
+                    # có trong bản dựng» would be the same lie as a disabled
+                    # button with no reason, told about a tool that is right
+                    # there in the BIM menu.
+                    from views.main_window import (
+                        SHEET_COMMANDS as _SHEET_REF)
+
+                    button.setEnabled(False)
+                    if cmd_id in _SHEET_REF:
+                        reason = tr("%s — mở Bố cục (Composer) và một tờ "
+                                    "trước.") % label
+                    else:
+                        reason = tr("%s — công cụ này chưa có trong bản "
+                                    "dựng.") % label
+                    button.setToolTip(reason)
                 else:
                     button.setToolTip(f"{label} ({key})" if key else label)
                     button.clicked.connect(
                         lambda _checked=False, t=tool: self._run_tool(t))
+                    self._bar_wired.add(cmd_id)
                 col.addWidget(button)
                 self.bar_buttons[cmd_id] = button
+                self._bar_labels[cmd_id] = (label, key, tool)
         col.addStretch(1)
         # A scrollable column: sixty-one buttons must never decide how tall
         # the window is — the drawing does.
@@ -719,6 +746,47 @@ class PlanWindow(QDialog):
         scroll.setWidget(host)
         scroll.setMaximumWidth(120)
         return scroll
+
+    def refresh_bar(self) -> None:
+        """Re-decide every button's enabled state and tooltip.
+
+        A command of the SHEET runs only while the composer is showing
+        one, and the composer may be opened or closed long after this plan
+        window was: building the bar once would leave «Vùng vẽ» disabled
+        (or, worse, enabled and doing nothing) for the rest of the
+        session. Cheap enough to run on every refresh — it only writes to
+        buttons that already exist.
+        """
+        for cmd_id, button in getattr(self, "bar_buttons", {}).items():
+            row = getattr(self, "_bar_labels", {}).get(cmd_id)
+            if row is None:
+                continue
+            label, key, tool = row
+            if tool is None:
+                continue
+            available = self._tool_available(tool)
+            if available and cmd_id not in self._bar_wired:
+                # A button that was disabled at BUILD time never had its
+                # click connected — so enabling it later would leave a
+                # button that looks live and does nothing, which is worse
+                # than the greyed one. Wire it the first time it is live.
+                button.clicked.connect(
+                    lambda _checked=False, t=tool: self._run_tool(t))
+                self._bar_wired.add(cmd_id)
+            button.setEnabled(available)
+            if available:
+                button.setToolTip(f"{label} ({key})" if key else label)
+            else:
+                from views.main_window import SHEET_COMMANDS as _SHEET_REF
+
+                if cmd_id in _SHEET_REF:
+                    button.setToolTip(
+                        tr("%s — mở Bố cục (Composer) và một tờ trước.")
+                        % label)
+                else:
+                    button.setToolTip(
+                        tr("%s — công cụ này chưa có trong bản dựng.")
+                        % label)
 
     def _tool_for(self, cmd_id: str):
         """The application's tool key a plan command maps to, or ``None``.
@@ -739,6 +807,16 @@ class PlanWindow(QDialog):
         # reached through the main window so it behaves identically.
         if str(tool_key) == "magnifier":
             self.toggle_magnifier()
+            return
+        from views.main_window import SHEET_COMMANDS as _SHEET_REF
+
+        if str(tool_key) in _SHEET_REF:
+            # A command of the SHEET: the same call the BIM menu makes, so
+            # the bar and the menu are one command and not two that drift.
+            run = getattr(self._window, "_run_sheet_command", None)
+            if callable(run):
+                run(str(tool_key))
+                self.refresh()
             return
         if str(tool_key) == "delete":
             # Delete removes what is MARKED, through the same command the
@@ -804,6 +882,10 @@ class PlanWindow(QDialog):
         """Re-read the building and the storey list, then redraw."""
         from core.building.model import building_of
 
+        # The bar's enabled states depend on things that change while this
+        # window is open (a composer showing a sheet), so they are decided
+        # with everything else rather than once at construction.
+        self.refresh_bar()
         self._seen_version = int(getattr(self._scene, "version", 0))
 
         self._building = building_of(self._scene)
