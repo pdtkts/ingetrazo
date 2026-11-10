@@ -740,6 +740,26 @@ class PlanWindow(QDialog):
         if str(tool_key) == "magnifier":
             self.toggle_magnifier()
             return
+        if str(tool_key) == "delete":
+            # Delete removes what is MARKED, through the same command the
+            # panel uses, so it is one undo step — and the plan already
+            # answers the Delete KEY; the bar button is the same act.
+            from core.history import DeletePlanCurvesCommand
+
+            taken = self.canvas.picked_curves() if hasattr(
+                self.canvas, "picked_curves") else []
+            if not taken:
+                self._say(tr("Chưa chọn hình nào để xoá — bấm vào hình "
+                             "trên mặt bằng trước."))
+                return
+            self._write(DeletePlanCurvesCommand(taken))
+            self.canvas.mark_curve(None, False)
+            self.refresh()
+            self._say(tr("Đã xoá %d hình vẽ 2D.") % len(taken))
+            return
+        if str(tool_key) == "stretch":
+            self._stretch_curves()
+            return
         if str(tool_key) == "copy2d":
             taken = self.clipboard_curves()
             self._say(tr("Đã sao chép %d hình vẽ 2D.") % len(taken)
@@ -816,6 +836,8 @@ class PlanWindow(QDialog):
             return True
         if str(tool_key) == "paste2d":
             return bool(getattr(self, "_curves", None))
+        if str(tool_key) in ("delete", "stretch"):
+            return True
         from views.main_window import SHEET_COMMANDS as _SHEET_REFS
 
         sheet_commands = _SHEET_REFS
@@ -1164,6 +1186,68 @@ class PlanWindow(QDialog):
     #: because a copy in one plan window is for pasting in the same one,
     #: and a second window must not silently share it — see
     #: ``_clip_owner``, which is the window the copy came from.
+    def _stretch_curves(self) -> None:
+        """Scale the marked drawing about its own centre by a factor the
+        user names — «Kéo giãn» for the office's ink.
+
+        A factor and not a drag: the plan's drawn entities have no handles
+        of their own, and a scale stated as a NUMBER («×1,5») is what a
+        draughtsman actually says when stretching a detail. About the
+        selection's own centre, so the drawing grows in place rather than
+        marching off the sheet.
+        """
+        from PySide6.QtWidgets import QInputDialog
+
+        from core.history import CompoundCommand, OffsetPlanCurvesCommand
+
+        taken = self.canvas.picked_curves() if hasattr(
+            self.canvas, "picked_curves") else []
+        if not taken:
+            self._say(tr("Chưa chọn hình nào để kéo giãn — bấm vào hình "
+                         "trên mặt bằng trước."))
+            return
+        factor, ok = QInputDialog.getDouble(
+            self, tr("Kéo giãn"), tr("Hệ số (×):"), 1.5, 0.01, 1000.0, 3)
+        if not ok or abs(float(factor) - 1.0) < 1e-9:
+            return
+        xs = [x for curve in taken for x, _y in curve.points]
+        ys = [y for curve in taken for _x, y in curve.points]
+        if not xs or not ys:
+            return
+        cx = (min(xs) + max(xs)) / 2.0
+        cy = (min(ys) + max(ys)) / 2.0
+        # One command, so Ctrl+Z takes the whole stretch back.
+        from core.history import Command
+
+        class _Scale(Command):                      # noqa: D401 — local
+            """Scale the taken curves about (cx, cy)."""
+
+            def __init__(self, curves, factor, cx, cy) -> None:
+                self._curves = list(curves)
+                self._factor = float(factor)
+                self._cx, self._cy = float(cx), float(cy)
+                self._saved: list = []
+
+            def do(self, scene) -> None:
+                self._saved = [list(c.points) for c in self._curves]
+                for curve in self._curves:
+                    curve.points = [
+                        (self._cx + (x - self._cx) * self._factor,
+                         self._cy + (y - self._cy) * self._factor)
+                        for x, y in curve.points]
+                scene.version += 1
+
+            def undo(self, scene) -> None:
+                for curve, points in zip(self._curves, self._saved):
+                    curve.points = list(points)
+                scene.version += 1
+
+        del CompoundCommand, OffsetPlanCurvesCommand
+        self._write(_Scale(taken, float(factor), cx, cy))
+        self.refresh()
+        self._say(tr("Đã kéo giãn %d hình ×%.3g.") % (len(taken),
+                                                      float(factor)))
+
     def clipboard_curves(self) -> list:
         """Make the marked selection the 2D clipboard's own content."""
         from core.plan_draw import PlanCurve

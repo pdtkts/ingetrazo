@@ -315,3 +315,49 @@ def test_pasting_with_nothing_copied_says_so_and_writes_nothing(plan):
     plan._run_tool("paste2d")
     assert len(scene.plan_curves) == before
     assert plan.status.text(), "phải nói vì sao không dán được"
+
+
+def test_stretch_scales_the_marked_drawing_about_its_centre(plan, window,
+                                                            monkeypatch):
+    """«Kéo giãn» is stated as a FACTOR because the plan's drawn entities
+    have no handles: a draughtsman stretching a detail says «×1,5». About
+    the selection's own centre, so it grows in place."""
+    from PySide6.QtWidgets import QInputDialog
+
+    scene, history = plan._scene, window.viewport.history
+    _draw(plan, "line", (0, 0), (4000, 0))
+    plan.cancel_draft()
+    line = scene.plan_curves[0]
+    plan.canvas.mark_curve(line, False)
+
+    monkeypatch.setattr(QInputDialog, "getDouble",
+                        staticmethod(lambda *a, **k: (2.0, True)))
+    before = list(line.points)
+    plan._run_tool("stretch")
+
+    assert line.points == [(-2000.0, 0.0), (6000.0, 0.0)], line.points
+    history.undo()
+    assert line.points == before, "Ctrl+Z không trả lại đúng hình cũ"
+    history.redo()
+    assert line.points == [(-2000.0, 0.0), (6000.0, 0.0)]
+
+
+def test_stretch_refuses_with_nothing_marked_and_writes_nothing(plan):
+    scene = plan._scene
+    _draw(plan, "line", (0, 0), (3000, 0))
+    plan.cancel_draft()
+    before = list(scene.plan_curves[0].points)
+    plan._run_tool("stretch")
+    assert scene.plan_curves[0].points == before
+    assert plan.status.text(), "phải nói vì sao không kéo giãn được"
+
+
+def test_the_bar_s_delete_removes_the_marked_drawing_in_one_step(plan,
+                                                                window):
+    scene, history = plan._scene, window.viewport.history
+    _draw(plan, "circle", (1000, 1000), (1000, 2000))
+    plan.canvas.mark_curve(scene.plan_curves[0], False)
+    plan._run_tool("delete")
+    assert scene.plan_curves == []
+    history.undo()
+    assert len(scene.plan_curves) == 1, "Ctrl+Z không trả hình lại"
