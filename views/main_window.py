@@ -3278,11 +3278,23 @@ class MainWindow(QMainWindow):
 
     # ---- BIM menu actions ---------------------------------------------------
 
+    def composer_window(self):
+        """The composer, if this window has one OPENED, else ``None``.
+
+        ``self._composer`` is where the window is kept (`_ensure_composer`
+        builds it on demand); there has never been a ``self.composer``, so
+        reading that name returned ``None`` on a window whose composer was
+        right there on screen — which made every command of the SHEET
+        unreachable while the tests, which set the name themselves,
+        reported them working.
+        """
+        return getattr(self, "_composer", None)
+
     def _run_sheet_command(self, cmd_id: str) -> None:
         """Run a layout command on the sheet in front of the composer."""
         from PySide6.QtWidgets import QMessageBox
 
-        composer = getattr(self, "composer", None)
+        composer = self.composer_window()
         if composer is None:
             QMessageBox.information(
                 self, tr("Khung tờ giấy"),
@@ -3397,7 +3409,7 @@ class MainWindow(QMainWindow):
                 self, tr("Khung tờ giấy"),
                 tr("Tờ này đã có khung và khung tên rồi."))
             return
-        composer = getattr(self, "composer", None)
+        composer = self.composer_window()
         if composer is not None and hasattr(composer, "refresh"):
             composer.refresh()
         self.viewport.notify_scene_changed()
@@ -7012,6 +7024,14 @@ class MainWindow(QMainWindow):
         Minimised, it comes back out of the taskbar."""
         from views.composer import bring_to_front
         bring_to_front(self._ensure_composer())
+        # A command of the SHEET can only run while the composer is showing
+        # one, and the plan window was built before this moment: without
+        # this call its buttons stay as they were decided at construction,
+        # so «Vùng vẽ» never wakes up in the session the user actually has.
+        plan = getattr(self, "_plan_window", None)
+        refresh = getattr(plan, "refresh_bar", None)
+        if callable(refresh):
+            refresh()
 
     # ---- Model / sheet tabs (the strip at the bottom) -----------------------
     def _refresh_sheet_tabs(self) -> None:

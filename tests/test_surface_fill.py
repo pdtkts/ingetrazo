@@ -218,3 +218,83 @@ def test_the_paper_hatches_each_ring_in_its_own_pattern():
     assert concrete_ink > 0, "vùng bê tông không được tô gì"
     assert masonry_ink != concrete_ink, \
         "hai vật liệu tô ra cùng một vệt — mất hẳn ý nghĩa của poché"
+
+
+def test_two_elements_cutting_the_same_ring_do_not_get_a_guessed_material():
+    """A wall doubled by another, a column laid on a wall's own axis: the
+    two produce byte-identical cut rings, and picking the first would make
+    the answer depend on the order `scene.groups` happens to be in — an
+    edit with nothing to do with the drawing would change a wall's hatch.
+    The neutral answer is the honest one."""
+    from core.building import commands as C
+    from core.building.scene_sync import sync
+    from core.building.surface_fill import material_of_ring
+
+    scene, building, story_id = _storey_scene(with_column=False)
+    # Two walls on the same baseline: identical geometry, different fabric.
+    for material in ("gach", "btct"):
+        command = C.add_element("wall", story_id, {
+            "baseline_start_mm": [0.0, 0.0], "baseline_end_mm": [6000.0, 0.0],
+            "thickness_mm": 200.0, "height_mm": 3300.0,
+            "building_material_id": material})
+        command._rebuild = lambda s, b: sync(s, b)
+        history = History(scene)
+        history.execute(command)
+    building = building_of(scene)
+
+    from core.building import drawings as _drawings
+    from core.hlr import hlr_drawing
+
+    view = _drawings.view_for(building,
+                             {"kind": "story", "story_id": story_id})
+    plane = view.section_planes[0] if view.section_planes else None
+    model = hlr_drawing(scene, view.camera(), profiles=True, fills=True,
+                        section=plane)
+    from core.building.surface_fill import cut_rings_per_element
+
+    attributed = cut_rings_per_element(scene, plane, view.camera())
+    assert attributed, "không quy được vùng cắt nào về cấu kiện"
+
+    matched = {material_of_ring(scene, ring, attributed, "NEUTRAL")
+               for ring in model.loops}
+    assert "NEUTRAL" in matched, (
+        "vùng cắt chung của hai cấu kiện bị gán vật liệu của một trong hai: "
+        f"{sorted(matched)}")
+
+
+def test_the_ambiguous_answer_does_not_depend_on_the_group_order():
+    """The same scene with `scene.groups` reversed must answer the same —
+    that is what «order-dependent» means, and it is the defect being
+    pinned."""
+    from core.building import commands as C
+    from core.building import drawings as _drawings
+    from core.building.scene_sync import sync
+    from core.building.surface_fill import (cut_rings_per_element,
+                                            material_of_ring)
+    from core.hlr import hlr_drawing
+
+    scene, building, story_id = _storey_scene(with_column=False)
+    for material in ("gach", "btct"):
+        command = C.add_element("wall", story_id, {
+            "baseline_start_mm": [0.0, 0.0], "baseline_end_mm": [6000.0, 0.0],
+            "thickness_mm": 200.0, "height_mm": 3300.0,
+            "building_material_id": material})
+        command._rebuild = lambda s, b: sync(s, b)
+        History(scene).execute(command)
+    building = building_of(scene)
+    view = _drawings.view_for(building,
+                             {"kind": "story", "story_id": story_id})
+    plane = view.section_planes[0] if view.section_planes else None
+    model = hlr_drawing(scene, view.camera(), profiles=True, fills=True,
+                        section=plane)
+
+    answers = []
+    for flip in (False, True):
+        groups = list(scene.groups)
+        scene.groups[:] = list(reversed(groups)) if flip else groups
+        attributed = cut_rings_per_element(scene, plane, view.camera())
+        answers.append(sorted({material_of_ring(scene, ring, attributed,
+                                                "NEUTRAL")
+                               for ring in model.loops}))
+        scene.groups[:] = groups
+    assert answers[0] == answers[1], answers

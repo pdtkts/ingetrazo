@@ -1125,6 +1125,60 @@ def test_re_issuing_a_document_issued_by_an_older_build_does_not_double():
         sorted(scene.bim_annotations)
 
 
+def test_a_storey_export_does_not_mistake_the_grid_s_key_for_the_drawing_s():
+    """The grid's registry key is the drawing's plus «·grid», and the grid
+    is written FIRST (axes before dimensions) — so a suffix scan over the
+    registry returned the GRID key, the export filed the dimensions under
+    it, and `_clear_annotations` wiped the grid's own axis lines: 42 → 56
+    dimensions and the grid gone from the model."""
+    from core.building import commands as C
+    from core.building import docset as _docset
+    from core.building import drawings as _drawings
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.building.scene_sync import sync
+    from core.history import History
+    from core.scene import Scene
+    from formats.dxf_bim import resolve_annotation_key
+
+    scene = Scene()
+    history = History(scene)
+    S.build_sample(history, scene, "townhouse")
+    building = building_of(scene)
+    story_id = str(building.stories[0]["id"])
+    command = C.add_element("grid", story_id, {"axes": [
+        {"name": "1", "dir": "y", "offset_mm": 0.0},
+        {"name": "2", "dir": "y", "offset_mm": 4000.0},
+        {"name": "A", "dir": "x", "offset_mm": 0.0},
+        {"name": "B", "dir": "x", "offset_mm": 6000.0}]})
+    command._rebuild = lambda s, b: sync(s, b)
+    history.execute(command)
+
+    _docset.generate_docset(scene, building_of(scene), annotations=True)
+    building = building_of(scene)
+    registry = dict(scene.bim_annotations)
+    assert any(str(k).endswith("·grid") for k in registry), \
+        "lưới trục chưa được ghi vào registry — test không đo được gì"
+
+    view = _drawings.view_for(building,
+                             {"kind": "story", "story_id": story_id})
+    key = resolve_annotation_key(scene, view)
+    assert not str(key).endswith("·grid"), \
+        f"khoá trả về là của LƯỚI: {key!r}"
+
+    # …and the export under that key leaves the dimensions and the grid's
+    # own axis lines alone.
+    edges_before = len(scene.mesh.edges)
+    printed = len(scene.dimensions)
+    view.annotation_key = key
+    _drawings.annotate_plan(scene, building, view, key=key)
+    assert len(scene.dimensions) == printed, \
+        f"xuất bản vẽ lại nhân đôi: {printed} → {len(scene.dimensions)}"
+    assert len(scene.mesh.edges) >= edges_before, \
+        "lưới trục bị xoá khỏi mô hình"
+    assert any(str(k).endswith("·grid") for k in scene.bim_annotations)
+
+
 def test_a_fresh_document_still_gets_the_storey_unique_key():
     """The reuse must not become the rule: with no earlier key to honour,
     two storeys that share a name still get keys of their own."""
@@ -1147,3 +1201,69 @@ def test_a_fresh_document_still_gets_the_storey_unique_key():
     keys = sorted(str(k) for k in scene.bim_annotations)
     assert len(set(keys)) == len(keys), keys
     assert len(scene.dimensions) == 42, len(scene.dimensions)
+
+
+def test_a_softening_undo_does_not_write_into_a_mesh_the_document_dropped():
+    """A BIM re-sync REPLACES a group's mesh between do and undo. Writing
+    the old flags into the detached mesh would report the undo done while
+    the live document kept the softened state."""
+    import math
+
+    from PySide6.QtGui import QVector3D as V
+
+    from core.group import Group
+    from core.history import History, SoftenEdgesCommand
+    from core.mesh import Mesh
+    from core.scene import Scene
+
+    def prism(m, n=24, r=1.0, h=2.0):
+        lo = [V(r * math.cos(2 * math.pi * i / n), r * math.sin(2 * math.pi * i / n), 0.0)
+              for i in range(n)]
+        hi = [V(r * math.cos(2 * math.pi * i / n), r * math.sin(2 * math.pi * i / n), h)
+              for i in range(n)]
+        for i in range(n):
+            j = (i + 1) % n
+            m.add_face([lo[i], lo[j], hi[j], hi[i]])
+        m.add_face(list(reversed(lo)))
+        m.add_face(list(hi))
+        return m
+
+    scene = Scene()
+    mesh = Mesh()
+    prism(mesh)
+    group = Group(mesh)
+    scene.groups.append(group)
+    history = History(scene)
+    command = SoftenEdgesCommand(42.0)
+    history.execute(command)
+    assert command._before, "không có cạnh nào được làm mềm — test vô nghĩa"
+    as_do_left_it = [bool(edge.soft) for edge in mesh.edges]
+
+    fresh = Mesh()
+    prism(fresh)
+    group.mesh = fresh          # what a BIM rebuild does
+    history.undo()
+    assert [bool(edge.soft) for edge in mesh.edges] == as_do_left_it, (
+        "undo đã ghi vào lưới mà tài liệu không còn giữ")
+
+
+def test_a_derived_cut_material_list_never_reaches_the_file():
+    """`cut_materials` is filled by the RENDER from the model on every
+    draw. Saving it wrote the model's fabric into the drawing set, where a
+    later edit to a wall's material could never reach it."""
+    from core.composition import Composicion
+
+    composition = Composicion()
+    frame = composition.default_frame()
+    frame.cut_materials = ["Gạch", "Bê tông"]
+    composition.frames.append(frame)
+
+    record = composition.to_dict()
+    assert record["frames"][0].get("cut_materials") == [], \
+        "trường dẫn xuất bị ghi vào tệp"
+    assert Composicion.from_dict(record).frames[0].cut_materials == []
+
+    # A record written by an older build must not resurrect it either.
+    record["frames"][0]["cut_materials"] = ["Cũ"]
+    assert Composicion.from_dict(record).frames[0].cut_materials == [], \
+        "tệp cũ hồi sinh được trường dẫn xuất"

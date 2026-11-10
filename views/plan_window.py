@@ -347,13 +347,31 @@ class _Canvas(QWidget):
             event.accept()
 
     def keyPressEvent(self, event) -> None:         # noqa: N802 — Qt
-        """Delete removes the selected element; Esc drops the selection.
+        """Delete removes what is MARKED — the 2D drawing first, then the
+        picked element; Esc drops the selection.
 
         A drag needs no keyboard, but a pick does: the plan's own way to
         remove is the Delete key, through the same command the panel uses
-        (so it is one undo step and the 3D follows).
+        (so it is one undo step and the 3D follows). The drawing comes
+        first because it is what the hand marked most recently, and the
+        element is kept for a model with nothing marked.
         """
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            # The MARKED 2D drawing first: it is what the hand marked, and
+            # it goes through the same command the bar's Delete runs, so
+            # the two are one undo step. Then the picked ELEMENT — the
+            # plan's original meaning of the key, kept for a model with
+            # nothing marked.
+            picked = self.picked_curves()
+            if picked:
+                # The drop is SHARED with the bar's Delete: «every way of
+                # deleting a drawing» is one function, so the key and the
+                # button cannot drift apart again.
+                drop = getattr(self._plan, "_delete_marked_curves", None)
+                if callable(drop):
+                    drop()
+                    event.accept()
+                    return
             if self._selected is not None:
                 self._plan.remove_element(self._selected)
                 self._selected = None
@@ -731,8 +749,13 @@ class PlanWindow(QDialog):
                     button.setToolTip(reason)
                 else:
                     button.setToolTip(f"{label} ({key})" if key else label)
+                    # The COMMAND id, not the tool it maps to: they differ
+                    # exactly where the behaviour does («delete» removes the
+                    # marked 2D drawing while «eraser» is the 3D eraser),
+                    # and passing the mapped name made the button do the
+                    # wrong one.
                     button.clicked.connect(
-                        lambda _checked=False, t=tool: self._run_tool(t))
+                        lambda _checked=False, c=cmd_id: self._run_tool(c))
                     self._bar_wired.add(cmd_id)
                 col.addWidget(button)
                 self.bar_buttons[cmd_id] = button
@@ -771,7 +794,7 @@ class PlanWindow(QDialog):
                 # button that looks live and does nothing, which is worse
                 # than the greyed one. Wire it the first time it is live.
                 button.clicked.connect(
-                    lambda _checked=False, t=tool: self._run_tool(t))
+                    lambda _checked=False, c=cmd_id: self._run_tool(c))
                 self._bar_wired.add(cmd_id)
             button.setEnabled(available)
             if available:
@@ -822,18 +845,14 @@ class PlanWindow(QDialog):
             # Delete removes what is MARKED, through the same command the
             # panel uses, so it is one undo step — and the plan already
             # answers the Delete KEY; the bar button is the same act.
-            from core.history import DeletePlanCurvesCommand
-
-            taken = self.canvas.picked_curves() if hasattr(
-                self.canvas, "picked_curves") else []
-            if not taken:
+            #
+            # Reached by the registry id «delete» and NOT by the tool key
+            # it maps to: the bar passes ``COMMAND_TOOLS[cmd]`` (which is
+            # «eraser» for delete), so a check on the tool key would never
+            # fire from the button and the marked drawing would survive.
+            if not self._delete_marked_curves():
                 self._say(tr("Chưa chọn hình nào để xoá — bấm vào hình "
                              "trên mặt bằng trước."))
-                return
-            self._write(DeletePlanCurvesCommand(taken))
-            self.canvas.mark_curve(None, False)
-            self.refresh()
-            self._say(tr("Đã xoá %d hình vẽ 2D.") % len(taken))
             return
         if str(tool_key) == "stretch":
             self._stretch_curves()
@@ -930,7 +949,12 @@ class PlanWindow(QDialog):
             # A command of the SHEET: it needs a composer showing one, and
             # the button saying so is more honest than a greyed one that
             # never explains itself.
-            composer = getattr(self._window, "composer", None)
+            # ``composer_window()`` and not a ``composer`` attribute: the
+            # window keeps it as ``_composer``, and reading the name that
+            # does not exist left these commands unreachable on a machine
+            # whose composer was open in front of the user.
+            getter = getattr(self._window, "composer_window", None)
+            composer = getter() if callable(getter) else None
             return composer is not None and \
                 getattr(composer, "comp", None) is not None
         return tool_key in getattr(self._window, "_tools", {})
@@ -1040,6 +1064,22 @@ class PlanWindow(QDialog):
     def fit(self) -> None:
         self.canvas.fit()
 
+    def _delete_marked_curves(self) -> list:
+        """Drop the marked 2D drawing, one undo step. Shared by the bar's
+        Delete and by the Delete KEY, which are the same act; returns what
+        was dropped, empty when nothing was marked."""
+        from core.history import DeletePlanCurvesCommand
+
+        taken = self.canvas.picked_curves() if hasattr(
+            self.canvas, "picked_curves") else []
+        if not taken:
+            return []
+        self._write(DeletePlanCurvesCommand(taken))
+        self.canvas.mark_curve(None, False)
+        self.refresh()
+        self._say(tr("Đã xoá %d hình vẽ 2D.") % len(taken))
+        return taken
+
     def _say(self, text: str) -> None:
         self.status.setText(str(text))
 
@@ -1118,6 +1158,11 @@ class PlanWindow(QDialog):
         from core.plan_draw import curves_at
 
         for curve in curves_at(self._scene, self._cut_z_mm() / 1000.0):
+            # A curve on a layer set not to print is not drawn here either:
+            # the DXF and the composer both ask this, so painting it anyway
+            # showed the user a line that would never reach the paper.
+            if not self._scene.entity_visible(curve):
+                continue
             for x1, y1, x2, y2 in curve.segments():
                 segs.append([float(x1), float(y1), float(x2), float(y2),
                              _DRAWN_KIND])

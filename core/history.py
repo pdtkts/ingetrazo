@@ -3200,11 +3200,20 @@ class SoftenEdgesCommand(Command):
         self._after: list = []
 
     def _targets(self, scene):
+        """``(group, mesh)`` for every mesh this command may touch.
+
+        The LOOSE mesh is included: a freeform model has no groups at all,
+        and a softening angle that ignored it would do nothing on exactly
+        the drawings a SketchUp user makes first.
+        """
         for group in getattr(scene, "groups", None) or ():
             mesh = getattr(group, "mesh", None)
             if mesh is None:
                 continue
-            yield mesh
+            yield (group, mesh)
+        loose = getattr(scene, "mesh", None)
+        if loose is not None:
+            yield (None, loose)
 
     def do(self, scene) -> None:
         import math
@@ -3212,7 +3221,12 @@ class SoftenEdgesCommand(Command):
         cos_t = math.cos(math.radians(self.deg))
         self._before = []
         self._after = []
-        for mesh in self._targets(scene):
+        # (group, mesh) pairs: undo re-resolves the group's mesh, because a
+        # BIM re-sync between do and undo REPLACES it, and writing the flags
+        # into the detached old mesh would report success while the live
+        # document kept the softened state.
+        self._owners = []
+        for group, mesh in self._targets(scene):
             for edge in mesh.edges:
                 faces = getattr(edge, "faces", None) or ()
                 if len(faces) != 2:
@@ -3224,6 +3238,7 @@ class SoftenEdgesCommand(Command):
                 if was == now:
                     continue
                 self._before.append(_EdgeSoftness(edge, was))
+                self._owners.append((group, mesh))
                 edge.soft = now
                 self._after.append(now)
         if self._before:
@@ -3232,7 +3247,24 @@ class SoftenEdgesCommand(Command):
             scene._bounds_cache = None
 
     def undo(self, scene) -> None:
-        for row in self._before:
+        owners = self._owners or [(None, None)] * len(self._before)
+        for row, (group, mesh) in zip(self._before, owners):
+            if group is None:
+                # The loose mesh: it is the scene's own, and nothing
+                # rebuilds it behind the command's back (a BIM re-sync
+                # replaces GROUP meshes), so its edges are the same objects
+                # unless the whole document was swapped — in which case the
+                # angle is a document-level state, not this mesh's.
+                if getattr(scene, "mesh", None) is not mesh:
+                    continue
+            else:
+                live = getattr(group, "mesh", None)
+                if live is not None and live is not mesh:
+                    # The geometry was rebuilt: the edge this command
+                    # softened is not the edge in the document any more.
+                    # Writing into the old mesh would change nothing while
+                    # reporting the undo done.
+                    continue
             row.edge.soft = row.soft
         scene.version += 1
         if hasattr(scene, "_bounds_cache"):

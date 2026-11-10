@@ -1418,9 +1418,21 @@ class Composicion:
     # ---- Serialisation (.igz) -----------------------------------------------
     def to_dict(self) -> dict:
         from dataclasses import asdict
+        frames = []
+        for f in self.frames:
+            rec = asdict(f)
+            # DERIVED, not authored: the render fills it from the model's
+            # materials on the way to the paper. Saving it would write the
+            # model's fabric into the drawing set, where a later edit to a
+            # wall's material could not reach it — and the field is a
+            # property of the view, not of the sheet the user laid out.
+            # Emptied, not popped, so a fresh frame still saves exactly the
+            # bytes it always did.
+            rec["cut_materials"] = []
+            frames.append(rec)
         d = {"name": self.name, "paper": self.paper,
              "landscape": self.landscape, "margin_mm": self.margin_mm,
-             "frames": [asdict(f) for f in self.frames]}
+             "frames": frames}
         if self.bim_key:
             d["bim_key"] = self.bim_key
         if self.border:
@@ -1497,6 +1509,14 @@ def _build(kind, raw):
     from a newer version loads with its extra keys ignored."""
     from dataclasses import fields
     known = {f.name for f in fields(kind)}
+    if kind is MarcoVista:
+        # `cut_materials` is filled by the RENDER, from the model, every
+        # time the frame is drawn. A record carrying one would be a stale
+        # list from whenever the sheet was saved — a wall re-fabricated
+        # since would still hatch as it was — so the file is not allowed
+        # to set it, whether or not old versions wrote it.
+        raw = dict(raw)
+        raw.pop("cut_materials", None)
     return kind(**{k: v for k, v in raw.items() if k in known})
 
 

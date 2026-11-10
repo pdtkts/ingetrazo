@@ -354,13 +354,23 @@ def test_stretch_refuses_with_nothing_marked_and_writes_nothing(plan):
 
 def test_the_bar_s_delete_removes_the_marked_drawing_in_one_step(plan,
                                                                 window):
+    """Pressed on the BUTTON, not called by name: the registry id «delete»
+    maps to the tool key «eraser», so a test that calls `_run_tool` with
+    the registry id passes while the button — which used to pass the
+    mapped key — arms the eraser and leaves the drawing alone."""
     scene, history = plan._scene, window.viewport.history
     _draw(plan, "circle", (1000, 1000), (1000, 2000))
     plan.canvas.mark_curve(scene.plan_curves[0], False)
-    plan._run_tool("delete")
-    assert scene.plan_curves == []
+    plan.bar_buttons["delete"].click()
+    assert scene.plan_curves == [], "nút Xoá trên thanh không xoá hình"
     history.undo()
     assert len(scene.plan_curves) == 1, "Ctrl+Z không trả hình lại"
+    # The eraser keeps its own behaviour: it is the 3D tool, not Delete.
+    plan.refresh()
+    plan.bar_buttons["eraser"].click()
+    active = getattr(window.viewport, "active_tool", None)
+    assert type(active).__name__ == "EraserTool", \
+        "nút Tẩy lại đi xoá hình vẽ 2D"
 
 
 def test_the_rectangle_is_one_closed_shape(plan):
@@ -451,3 +461,25 @@ def test_mirror_refuses_with_nothing_marked(plan):
     plan._run_tool("mirror")
     assert scene.plan_curves[0].points == before
     assert plan.status.text()
+
+
+def test_the_delete_key_removes_the_marked_curve_in_one_step(plan, window):
+    """The KEY is what a drafting hand reaches for, and it goes through
+    the command — not through a bare element removal — so it is one undo
+    step and the 3D follows."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+
+    scene, history = plan._scene, window.viewport.history
+    _draw(plan, "line", (0, 0), (4000, 0))
+    plan.canvas.mark_curve(scene.plan_curves[0], False)
+    # The CANVAS, because that is what holds the focus while a drafting
+    # hand works — the key is handled there, not on the window.
+    event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key_Delete,
+                      Qt.KeyboardModifier.NoModifier)
+    plan.canvas.keyPressEvent(event)
+    QApplication.processEvents()
+    assert scene.plan_curves == [], "phím Delete không xoá hình đang chọn"
+    history.undo()
+    assert len(scene.plan_curves) == 1, "Delete không đi qua lệnh (Ctrl+Z câm)"

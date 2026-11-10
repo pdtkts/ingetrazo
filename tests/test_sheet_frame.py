@@ -118,7 +118,10 @@ def test_the_command_runs_from_the_registry_entry(window, monkeypatch):
     from views.composer import ComposerWindow
 
     composer = ComposerWindow(window)
-    window.composer = composer
+    # The REAL attribute. A test that sets a name production never sets
+    # passes while every user's command does nothing — which is exactly
+    # what happened here.
+    window._composer = composer
     sheet = _sheet(window, name="TỜ THỬ")
     composer.comp = sheet
     window._run_bim_command("sheet_frame", "sheet_frame")
@@ -155,7 +158,7 @@ def test_a_region_places_a_rule_backed_drawing_on_the_sheet(monkeypatch):
             def refresh(self):
                 pass
 
-        win.composer = _Composer()
+        win._composer = _Composer()
         seen = []
         monkeypatch.setattr(QMessageBox, "information",
                             staticmethod(lambda *a, **k: seen.append(a[2])))
@@ -216,7 +219,7 @@ def test_the_plan_bar_s_sheet_buttons_wake_up_when_a_sheet_opens(monkeypatch):
             def refresh(self):
                 pass
 
-        win.composer = _Composer()
+        win._composer = _Composer()
         plan.refresh()
 
         seen = []
@@ -259,7 +262,7 @@ def test_the_master_area_reports_the_sheet_s_own_numbers(monkeypatch):
             def refresh(self):
                 pass
 
-        win.composer = _Composer()
+        win._composer = _Composer()
         seen = []
         monkeypatch.setattr(QMessageBox, "information",
                             staticmethod(lambda *a, **k: seen.append(a[2])))
@@ -298,7 +301,7 @@ def test_the_plan_bar_offers_the_sheet_commands_only_when_a_sheet_is_open():
             def refresh(self):
                 pass
 
-        win.composer = _Composer()
+        win._composer = _Composer()
         for key in ("region", "sheet_frame", "master_area"):
             assert plan._tool_available(key), key
         # The plan's own drawing tools are unaffected by any of this.

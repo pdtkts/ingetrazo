@@ -748,11 +748,14 @@ def _paint_cut_hatches_mm(painter: QPainter, frame: MarcoVista, fills,
         if len(pts) < 3:
             continue
         name = str(materials[index]) if index < len(materials) else ""
-        families = families_for(name)
-        if not families:
-            # No material of its own: the generic 45° the frame always
-            # drew, at the frame's own step.
-            families = [(45.0, base, 0.0, 0.0)]
+        # The NAME is what says whether this ring was attributed: an empty
+        # one falls back to the frame's own step. Testing the FAMILIES would
+        # never fire, because `families_for("")` answers with a neutral
+        # pattern at 6 mm — so an unattributed area would hatch at a
+        # different density from everything around it for no reason the
+        # reader could see.
+        families = ([(45.0, base, 0.0, 0.0)] if not name
+                    else families_for(name))
         clip = QPainterPath()
         clip.moveTo(pts[0])
         for q in pts[1:]:

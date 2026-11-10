@@ -171,6 +171,7 @@ def material_of_ring(scene, ring, attributed, fallback: str = "") -> str:
     """
     box = _ring_box(ring)
     signature = _ring_signature(ring)
+    matched: list = []
     for element_id, _part, rings in attributed:
         for candidate in rings:
             # The box first (cheap, and it rejects almost everything), then
@@ -187,7 +188,20 @@ def material_of_ring(scene, ring, attributed, fallback: str = "") -> str:
                 continue
             fill = element_material(scene, element)
             if fill:
-                return fill
+                matched.append(fill)
+            break
+    if not matched:
+        return str(fallback or "")
+    # Two elements cutting the SAME ring — a wall doubled by another, a
+    # column laid on a wall's own axis — cannot both be right, and picking
+    # the first would make the answer depend on the order `scene.groups`
+    # happens to be in: an edit with nothing to do with the drawing would
+    # change a wall's hatch. One material is the answer; more than one is
+    # a question the drawing cannot answer, so it says the neutral thing
+    # instead of one of them being wrong.
+    distinct = set(matched)
+    if len(distinct) == 1:
+        return matched[0]
     return str(fallback or "")
 
 

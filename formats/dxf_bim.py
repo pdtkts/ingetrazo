@@ -480,9 +480,20 @@ def _drawing_key(scene, view):
     # it is the exact answer, where the name lookups below are guesses.
     story = str(getattr(view, "story_id", "") or "")
     if story:
+        # The ANNOTATIONS' key is `<drawing>·<story id>`; the GRID's is that
+        # plus «·grid». Both end with the story's id, so a single suffix
+        # scan returns whichever came first in the registry — and the grid
+        # is written FIRST (the axes go down before the dimensions), so the
+        # grid always won. An export then filed the dimensions under the
+        # grid's key and `_clear_annotations` wiped the grid's own axis
+        # lines: 42 → 56 dimensions and the grid gone from the model. The
+        # exact key is tried first, the grid's only if it is all there is.
         suffix = f"·{story}"
         for key in registry:
-            if str(key).endswith(suffix) or str(key).endswith(f"{suffix}·grid"):
+            if str(key).endswith(suffix):
+                return str(key)
+        for key in registry:
+            if str(key).endswith(f"{suffix}·grid"):
                 return str(key)
     candidates = [str(getattr(view, "name", "") or ""),
                   str(getattr(view, "story_id", "") or "")]
