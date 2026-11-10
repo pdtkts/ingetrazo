@@ -760,6 +760,9 @@ class PlanWindow(QDialog):
         if str(tool_key) == "stretch":
             self._stretch_curves()
             return
+        if str(tool_key) == "mirror":
+            self._mirror_curves()
+            return
         if str(tool_key) == "copy2d":
             taken = self.clipboard_curves()
             self._say(tr("Đã sao chép %d hình vẽ 2D.") % len(taken)
@@ -836,7 +839,7 @@ class PlanWindow(QDialog):
             return True
         if str(tool_key) == "paste2d":
             return bool(getattr(self, "_curves", None))
-        if str(tool_key) in ("delete", "stretch"):
+        if str(tool_key) in ("delete", "stretch", "mirror"):
             return True
         from views.main_window import SHEET_COMMANDS as _SHEET_REFS
 
@@ -1247,6 +1250,79 @@ class PlanWindow(QDialog):
         self.refresh()
         self._say(tr("Đã kéo giãn %d hình ×%.3g.") % (len(taken),
                                                       float(factor)))
+
+    def _mirror_curves(self) -> None:
+        """Flip the marked drawing about a line the user draws.
+
+        Two clicks define the mirror line, the way the 3D's own Mirror
+        asks: a mirror is stated as an AXIS, and an axis the user cannot
+        see is a mirror they cannot aim. The dihedral is stored per point
+        so undo puts every one back exactly.
+        """
+        from core.history import Command
+
+        taken = self.canvas.picked_curves() if hasattr(
+            self.canvas, "picked_curves") else []
+        if not taken:
+            self._say(tr("Chưa chọn hình nào để lật — bấm vào hình trên "
+                         "mặt bằng trước."))
+            return
+        # The axis is gathered as the next two plan clicks: a mirror is
+        # stated as a LINE, and it has to be a line the user can see
+        # themselves drawing on the plan they are looking at.
+        self._axis_points = []
+        from views.draft_tools import _MirrorAxisTool
+
+        self._draft = _MirrorAxisTool(self)
+        self._say(tr("Lật: bấm hai điểm của trục lật."))
+
+    def _on_mirror_axis(self, p0, p1) -> None:
+        """The axis arrived: mirror the marked drawing across it."""
+        from core.history import Command
+
+        taken = self.canvas.picked_curves() if hasattr(
+            self.canvas, "picked_curves") else []
+        self._mirror_first = None
+        if not taken or p0 is None or p1 is None:
+            return
+        x0, y0 = float(p0[0]), float(p0[1])
+        x1, y1 = float(p1[0]), float(p1[1])
+        dx, dy = x1 - x0, y1 - y0
+        span = dx * dx + dy * dy
+        if span <= 1e-9:
+            self._say(tr("Trục lật dài 0 — chưa lật gì."))
+            return
+
+        class _Mirror(Command):                     # noqa: D401 — local
+            """Reflect the taken curves across the line (x0,y0)→(x1,y1)."""
+
+            def __init__(self, curves) -> None:
+                self._curves = list(curves)
+                self._saved: list = []
+
+            def _flip(self, scene) -> None:
+                for curve in self._curves:
+                    out = []
+                    for x, y in curve.points:
+                        t = ((x - x0) * dx + (y - y0) * dy) / span
+                        px, py = x0 + t * dx, y0 + t * dy
+                        out.append((2.0 * px - x, 2.0 * py - y))
+                    curve.points = out
+                scene.version += 1
+
+            def do(self, scene) -> None:
+                self._saved = [list(c.points) for c in self._curves]
+                self._flip(scene)
+
+            def undo(self, scene) -> None:
+                for curve, points in zip(self._curves, self._saved):
+                    curve.points = list(points)
+                scene.version += 1
+
+        del Command
+        self._write(_Mirror(taken))
+        self.refresh()
+        self._say(tr("Đã lật %d hình qua trục đã chọn.") % len(taken))
 
     def clipboard_curves(self) -> list:
         """Make the marked selection the 2D clipboard's own content."""

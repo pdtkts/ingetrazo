@@ -418,3 +418,36 @@ def test_cancelling_the_side_count_writes_nothing(plan, monkeypatch):
     plan.arm_draft("polygon")
     plan.draft_click(0.0, 0.0)
     assert len(scene.plan_curves) == before
+
+
+def test_mirror_flips_the_marked_drawing_across_a_drawn_axis(plan, window):
+    """The axis is gathered as two plan clicks — the same pipeline, the
+    same snapping — because a mirror stated as a line the user cannot aim
+    is a mirror that lands somewhere else."""
+    scene, history = plan._scene, window.viewport.history
+    _draw(plan, "line", (1000, 0), (4000, 1000))
+    plan.cancel_draft()
+    line = scene.plan_curves[0]
+    before = list(line.points)
+    plan.canvas.mark_curve(line, False)
+
+    plan._run_tool("mirror")
+    assert plan._draft is not None, "trục lật chưa được hỏi"
+    plan.draft_click(0.0, 0.0)
+    plan.draft_click(0.0, 5000.0)                    # the y axis
+
+    assert line.points == [(-1000.0, 0.0), (-4000.0, 1000.0)], line.points
+    history.undo()
+    assert line.points == before, "Ctrl+Z không trả lại hình trước khi lật"
+    history.redo()
+    assert line.points == [(-1000.0, 0.0), (-4000.0, 1000.0)]
+
+
+def test_mirror_refuses_with_nothing_marked(plan):
+    scene = plan._scene
+    _draw(plan, "line", (0, 0), (2000, 0))
+    plan.cancel_draft()
+    before = list(scene.plan_curves[0].points)
+    plan._run_tool("mirror")
+    assert scene.plan_curves[0].points == before
+    assert plan.status.text()

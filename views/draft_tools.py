@@ -585,6 +585,27 @@ class PolygonTool(_CurveTool):
         self.points = []
 
 
+class _MirrorAxisTool(DraftTool):
+    """Gathers the two points of a mirror axis, then hands them over.
+
+    Not a drawing tool: it writes no entity. It exists so the axis comes
+    from the SAME click pipeline as every other plan gesture — the same
+    snapping, the same ortho — which is what makes the mirror line land on
+    the corner the user aimed at rather than where the mouse happened to
+    be.
+    """
+
+    hint = "Lật: bấm hai điểm của trục lật"
+    points_needed = 2
+
+    def commit(self) -> None:
+        points = list(self.points)
+        self.points = []
+        callback = getattr(self.plan, "_on_mirror_axis", None)
+        if callable(callback) and len(points) == 2:
+            callback(points[0], points[1])
+
+
 #: The plan command ids these tools implement, in the registry's spelling.
 DRAFT_TOOLS = {
     "dim": DimensionTool,
