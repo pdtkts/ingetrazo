@@ -432,3 +432,96 @@ def test_reopening_the_file_does_not_stack_the_cut_planes(tmp_path):
     DS.generate_docset(back, b)
     assert len(back.section_planes) <= before + 2, \
         f"mặt phẳng cắt bị chồng: {before} → {len(back.section_planes)}"
+
+
+def test_everything_bim_survives_a_save_and_reopen(tmp_path):
+    """L149: between them, the BIM features write to a dozen places on the
+    document — storeys and elements, the materials a wall is made of, the
+    steel a column is ordered as, the pens and the layer names the office
+    set, the drawn entities, the drawing set's own annotations. A save and
+    reopen must bring back ALL of it: a feature whose data does not travel
+    is a feature the colleague does not see.
+    """
+    from core.building import commands as C
+    from core.building import samples as _samples
+    from core.building.model import building_of
+    from core.history import History
+    from core.plan_draw import PlanCurve
+    from core.scene import Scene
+    from formats import igz
+
+    scene = Scene()
+    history = History(scene)
+    _samples.build_sample(history, scene, "townhouse")
+    building = building_of(scene)
+    story_id = str(building.stories[0]["id"])
+
+    # A little of every kind of BIM data, through the app's own commands.
+    wall = next(e for e in building.elements if e.get("type") == "wall")
+    for command in (
+            C.set_params(str(wall["id"]), {"thickness_mm": 275.0,
+                                           "building_material_id": "btct"}),
+            C.add_element("column", story_id, {
+                "x_mm": 2500.0, "y_mm": 1500.0, "width_mm": 300.0,
+                "depth_mm": 300.0, "height_mm": 3300.0}),
+            C.set_story_params(story_id, {"name": "Tầng trệt"})):
+        history.execute(command)
+
+    scene.plan_curves.append(PlanCurve("line", [(0.0, 0.0), (5000.0, 0.0)],
+                                       z=1.2, story_id=story_id))
+    scene.pens = dict(scene.pens or {})
+    scene.pens["cut"] = (0.5, 4, "continuous")
+    # A published drawing's own annotation. The registry records POSITIONS
+    # of the entities themselves, so a drawing with no annotations is
+    # correctly not recorded at all — the mark has to be a real one.
+    from PySide6.QtGui import QVector3D
+
+    from core.dimension import Dimension
+
+    mark = Dimension(QVector3D(0.0, 0.0, 1.2), QVector3D(5.0, 0.0, 1.2),
+                     QVector3D(0.0, 0.5, 0.0))
+    scene.dimensions.append(mark)
+    scene.bim_annotations["Mặt bằng thử"] = [mark]
+
+    before = {
+        "wall_thickness": next(e["params"]["thickness_mm"]
+                               for e in building_of(scene).elements
+                               if e.get("type") == "wall"
+                               and str(e["id"]) == str(wall["id"])),
+        "wall_material": next(e["params"].get("building_material_id")
+                              for e in building_of(scene).elements
+                              if str(e["id"]) == str(wall["id"])),
+        "columns": len([e for e in building_of(scene).elements
+                        if e.get("type") == "column"]),
+        "story_name": (building_of(scene).story(story_id) or {}).get("name"),
+        "curves": [c.to_dict() for c in scene.plan_curves],
+        "pens": dict(scene.pens),
+        "annotations": sorted(scene.bim_annotations),
+        "annotation_marks": len(next(iter(scene.bim_annotations.values()))),
+    }
+
+    path = tmp_path / "all.igz"
+    igz.save_scene(scene, path)
+    reopened = Scene()
+    igz.load_into(reopened, path)
+    after_building = building_of(reopened)
+
+    assert next(e["params"]["thickness_mm"]
+                for e in after_building.elements
+                if str(e["id"]) == str(wall["id"])) == \
+        before["wall_thickness"]
+    assert next(e["params"].get("building_material_id")
+                for e in after_building.elements
+                if str(e["id"]) == str(wall["id"])) == before["wall_material"]
+    assert len([e for e in after_building.elements
+                if e.get("type") == "column"]) == before["columns"]
+    assert (after_building.story(story_id) or {}).get("name") == \
+        before["story_name"]
+    assert [c.to_dict() for c in reopened.plan_curves] == before["curves"]
+    assert dict(reopened.pens) == before["pens"]
+    assert sorted(reopened.bim_annotations) == before["annotations"]
+    # …and the mark itself came back, not just the key: the registry points
+    # at entities the loader rebuilt, which is what makes a re-issue
+    # replace rather than stack.
+    assert sum(len(v) for v in reopened.bim_annotations.values()) == \
+        before["annotation_marks"]
