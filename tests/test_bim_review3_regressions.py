@@ -1082,3 +1082,68 @@ def test_the_plan_bar_s_crop_button_is_enabled():
         assert plan._tool_available("crop")
     finally:
         win.hide()
+
+
+def test_re_issuing_a_document_issued_by_an_older_build_does_not_double():
+    """The registry key gained the storey's id, and a document filed by an
+    earlier build carries the BARE drawing name. Minting the composite key
+    beside that one left both sets in the document — the composer draws
+    every dimension its frame can see, so re-issuing an existing office's
+    set doubled every chain. The composite key is the new default; an
+    existing key for the same storey is reused."""
+    from core.building import docset as _docset
+    from core.building import drawings as _drawings
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    history = History(scene)
+    S.build_sample(history, scene, "townhouse")
+    building = building_of(scene)
+    story_id = str(building.stories[0]["id"])
+
+    # As the previous build filed it: the bare drawing name, no storey id.
+    view = _drawings.view_for(building,
+                             {"kind": "story", "story_id": story_id})
+    view.annotation_key = "Mặt bằng Tầng 1"
+    _drawings.annotate_plan(scene, building, view,
+                            key=view.annotation_key)
+    assert "Mặt bằng Tầng 1" in scene.bim_annotations
+    printed = len(scene.dimensions)
+
+    _docset.generate_docset(scene, building_of(scene), annotations=True)
+
+    assert len(scene.dimensions) == 42, \
+        f"phát hành lại làm nhân đôi: {printed} → {len(scene.dimensions)}"
+    # The storey kept the key its drawing was already filed under, so the
+    # re-issue REPLACED rather than added a second set.
+    assert "Mặt bằng Tầng 1" in scene.bim_annotations
+    assert not [k for k in scene.bim_annotations
+                if str(k).startswith("Mặt bằng Tầng 1·")], \
+        sorted(scene.bim_annotations)
+
+
+def test_a_fresh_document_still_gets_the_storey_unique_key():
+    """The reuse must not become the rule: with no earlier key to honour,
+    two storeys that share a name still get keys of their own."""
+    from core.building import commands as C
+    from core.building import docset as _docset
+    from core.building import samples as S
+    from core.building.model import building_of
+    from core.history import History
+    from core.scene import Scene
+
+    scene = Scene()
+    history = History(scene)
+    S.build_sample(history, scene, "townhouse")
+    building = building_of(scene)
+    for story in building.stories[:2]:
+        history.execute(C.set_story_params(str(story["id"]),
+                                           {"name": "Tầng"}))
+    _docset.generate_docset(scene, building_of(scene), annotations=True)
+
+    keys = sorted(str(k) for k in scene.bim_annotations)
+    assert len(set(keys)) == len(keys), keys
+    assert len(scene.dimensions) == 42, len(scene.dimensions)

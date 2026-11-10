@@ -433,7 +433,23 @@ def fill_sheet(sheet, view, scene, *, name: str = "", annotations: bool = True,
     # document, so a sheet showed the floor above's chains and one storey's
     # annotations were gone for good. The NAME stays on the frame and the
     # title (a reader sees «Mặt bằng Tầng 1»); only the key is unique.
+    #
+    # A document issued by an EARLIER build files this storey under the
+    # bare drawing name («Mặt bằng Tầng 1»), and minting the composite key
+    # beside it left BOTH sets in the document: the composer draws every
+    # dimension its frame can see, so re-issuing an existing office's set
+    # doubled every chain — the very defect this key was introduced to
+    # avoid, moved onto the files that already exist. So the composite key
+    # is the NEW drawing's default, and an existing key for this same
+    # storey is reused instead.
     key_base = f"{scene_name}·{_annotation_scope(view)}"
+    registry = getattr(scene, "bim_annotations", None) or {}
+    if key_base not in registry:
+        from formats.dxf_bim import _drawing_key
+
+        found = _drawing_key(scene, view)
+        if found and str(found) in registry:
+            key_base = str(found)
     if building is not None and bool(grid):
         # The axes go down BEFORE the dimensions: a dimension is read
         # against the grid, and the two annotators key alike, so re-issuing
