@@ -361,3 +361,60 @@ def test_the_bar_s_delete_removes_the_marked_drawing_in_one_step(plan,
     assert scene.plan_curves == []
     history.undo()
     assert len(scene.plan_curves) == 1, "Ctrl+Z không trả hình lại"
+
+
+def test_the_rectangle_is_one_closed_shape(plan):
+    """Two opposite corners give A rectangle — one closed polyline, not
+    four loose segments a user would have to select and undo one by one."""
+    scene = plan._scene
+    _draw(plan, "rect", (0, 0), (4000, 3000))
+    assert len(scene.plan_curves) == 1
+    shape = scene.plan_curves[0]
+    assert shape.kind == "polyline"
+    assert shape.points == [(0.0, 0.0), (4000.0, 0.0), (4000.0, 3000.0),
+                            (0.0, 3000.0), (0.0, 0.0)], shape.points
+
+
+def test_a_flat_rectangle_writes_nothing(plan):
+    scene = plan._scene
+    before = len(scene.plan_curves)
+    state = _draw(plan, "rect", (0, 0), (0, 5000))
+    assert len(scene.plan_curves) == before
+    assert state.status.text()
+
+
+def test_a_regular_polygon_stands_on_the_radius_it_was_drawn(plan,
+                                                             monkeypatch):
+    """The centre and one vertex define it, the side count shapes it — and
+    every corner must sit on that same radius."""
+    import math
+
+    from PySide6.QtWidgets import QInputDialog
+
+    scene = plan._scene
+    monkeypatch.setattr(QInputDialog, "getInt",
+                        staticmethod(lambda *a, **k: (5, True)))
+    _draw(plan, "polygon", (8000, 8000), (8000, 10000))
+
+    shape = scene.plan_curves[0]
+    assert shape.kind == "polyline"
+    corners = shape.points[:-1]
+    assert len(corners) == 5, corners
+    assert shape.points[0] == shape.points[-1], "đa giác chưa khép kín"
+    for x, y in corners:
+        assert math.hypot(x - 8000.0, y - 8000.0) == pytest.approx(2000.0), \
+            (x, y)
+    # …and the first vertex is the one the user clicked.
+    assert corners[0] == pytest.approx((8000.0, 10000.0))
+
+
+def test_cancelling_the_side_count_writes_nothing(plan, monkeypatch):
+    from PySide6.QtWidgets import QInputDialog
+
+    scene = plan._scene
+    before = len(scene.plan_curves)
+    monkeypatch.setattr(QInputDialog, "getInt",
+                        staticmethod(lambda *a, **k: (0, False)))
+    plan.arm_draft("polygon")
+    plan.draft_click(0.0, 0.0)
+    assert len(scene.plan_curves) == before

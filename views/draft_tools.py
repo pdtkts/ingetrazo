@@ -496,6 +496,95 @@ class CircleTool(_CurveTool):
     REFUSE = "Bán kính bằng 0 — chưa ghi gì."
 
 
+class RectTool(_CurveTool):
+    """Two opposite corners: a closed rectangle, as a polyline.
+
+    A closed shape and not four loose segments: the office drags a
+    rectangle to get A rectangle, and four segments would need four clicks
+    to select and four undos to take back.
+    """
+
+    kind = "polyline"
+    hint = "Chữ nhật: bấm góc thứ nhất, rồi góc đối diện"
+    points_needed = 2
+    REFUSE = "Chữ nhật rộng hoặc cao 0 — chưa ghi gì."
+
+    def preview(self, x_mm: float, y_mm: float) -> list:
+        if not self.points:
+            return []
+        x0, y0 = self.points[0]
+        return [(x0, y0, float(x_mm), y0),
+                (float(x_mm), y0, float(x_mm), float(y_mm)),
+                (float(x_mm), float(y_mm), x0, float(y_mm)),
+                (x0, float(y_mm), x0, y0)]
+
+    def _corners(self) -> list:
+        (x0, y0), (x1, y1) = self.points
+        return [(float(x0), float(y0)), (float(x1), float(y0)),
+                (float(x1), float(y1)), (float(x0), float(y1))]
+
+    def commit(self) -> None:
+        (x0, y0), (x1, y1) = self.points
+        if abs(float(x1) - float(x0)) < 1.0 or \
+                abs(float(y1) - float(y0)) < 1.0:
+            self._refuse(self.REFUSE)
+            return
+        corners = self._corners()
+        # Closed by repeating the first point: a polyline that comes back
+        # to where it started is closed, and the DXF writer emits it as
+        # one LWPOLYLINE the receiving CAD reads as a closed shape.
+        self.points = corners + [corners[0]]
+        self._write_curve(list(self.points))
+        self.points = []
+
+
+class PolygonTool(_CurveTool):
+    """A regular polygon: the centre, then a vertex — and how many sides.
+
+    The count is asked ONCE, before the first click, because the shape is
+    defined by it: a hexagon and a pentagon are different tools, not two
+    states of one.
+    """
+
+    kind = "polyline"
+    hint = "Đa giác đều: chọn số cạnh, bấm tâm, rồi một đỉnh"
+    points_needed = 2
+    REFUSE = "Đa giác bán kính 0 — chưa ghi gì."
+    #: The sides of the design polygon, when the user has not said.
+    sides = 6
+
+    def click(self, x_mm: float, y_mm: float, *, snapping=None) -> bool:
+        if not self.points and not getattr(self, "_asked", False):
+            from PySide6.QtWidgets import QInputDialog
+
+            count, ok = QInputDialog.getInt(
+                self.plan, tr("Đa giác đều"), tr("Số cạnh:"),
+                int(self.sides), 3, 128, 1)
+            self._asked = True
+            if not ok:
+                return True
+            self.sides = int(count)
+        return super().click(x_mm, y_mm, snapping=snapping)
+
+    def commit(self) -> None:
+        import math as _math
+
+        (cx, cy), (vx, vy) = self.points
+        radius = _math.hypot(float(vx) - float(cx), float(vy) - float(cy))
+        if radius <= 1e-6:
+            self._refuse(self.REFUSE)
+            return
+        start = _math.atan2(float(vy) - float(cy), float(vx) - float(cx))
+        count = max(3, int(self.sides))
+        corners = [
+            (float(cx) + radius * _math.cos(start + 2.0 * _math.pi * i / count),
+             float(cy) + radius * _math.sin(start + 2.0 * _math.pi * i / count))
+            for i in range(count)]
+        self.points = corners + [corners[0]]
+        self._write_curve(list(self.points))
+        self.points = []
+
+
 #: The plan command ids these tools implement, in the registry's spelling.
 DRAFT_TOOLS = {
     "dim": DimensionTool,
@@ -510,6 +599,8 @@ DRAFT_TOOLS = {
     "arc2": Arc2Tool,
     "arc3": Arc3Tool,
     "circle": CircleTool,
+    "rect": RectTool,
+    "polygon": PolygonTool,
 }
 
 
